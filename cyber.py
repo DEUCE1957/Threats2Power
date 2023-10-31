@@ -185,6 +185,7 @@ class CyberComponent():
         super().__init__(*args, **kwargs)
         self.is_accessible = is_accessible
         self.is_compromised = is_compromised
+        self.is_deadend = False
         self.total_effort_spent = 0.0
         self.defences = OrderedDict()
 

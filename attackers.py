@@ -84,8 +84,12 @@ class RandomAttacker(Attacker):
         if time_available > 0 and len(nodes_compromised) < max_can_compromise:
             available_nodes = RandomAttacker.next_available_nodes(current_node)
             # Don't revisit nodes that were unsuccessfully attacked (not worth attacking)
-            worth_visiting = lambda node: node.is_worth_attacking() or node.is_compromised
-            next_nodes = [node for node in available_nodes if worth_visiting(node)]
+            next_nodes = [node for node in available_nodes if \
+                          node.is_worth_attacking() or node.is_compromised]
+            if len(next_nodes) == 0:
+                current_node.is_deadend = True
+                print([node.is_deadend for node in nodes_compromised])
+                next_nodes = list([node for node in nodes_compromised if not node.is_deadend])
             if len(next_nodes) > 0:
                 next_node = np.random.choice(next_nodes)
                 attack_path, new_nodes_compromised = \
