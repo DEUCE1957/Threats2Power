@@ -90,7 +90,10 @@ class Defence():
         
     def is_worth_attacking(self) -> bool:
         """Whether this Defence is still worth attacking"""
-        return False if isclose(self.effort_spent, self.effort_to_compromise) else True
+        if isclose(self.effort_spent, self.effort_to_compromise) or self.is_compromised:
+            return False
+        else:
+            return True
     
     def attack(self, budget:float, exploit_vulnerability:bool=False) -> (bool, float):
         """
@@ -121,6 +124,13 @@ class Defence():
         if can_be_successful:
             self.is_compromised = True
         return can_be_successful, budget_used
+    
+    def compromise(self):
+        """
+        Compromise this defence, regardless of difficulty or success rate. 
+        Automatically invoked when a parent node is compromised.
+        """
+        self.is_compromised= True
 
 class CommmonDefences():
     """
@@ -218,6 +228,16 @@ class CyberComponent():
         self.total_effort_spent += effort_spent
         return is_successful, effort_spent
     
+    def compromise(self):
+        """
+        Compromise this Cyber component, including all of its defences, regardless of
+        the success probability or effort required.
+        This is automatically invoked when a parent node is compromised.
+        """
+        for defence in self.defences.values():
+            defence.compromise()
+        self.is_compromised = True
+    
     def is_worth_attacking(self) -> bool:
         """
         Evaluates whether all Defences have been attacker with the 
@@ -227,6 +247,8 @@ class CyberComponent():
         Returns:
             bool: Whether additional attacks can make progress
         """
+        if self.is_compromised:
+            return False
         for defence in self.defences.values():
             if defence.is_worth_attacking():
                 return True

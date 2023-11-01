@@ -42,16 +42,24 @@ class RandomAttacker(Attacker):
             set[Node]: Unique set of all outgoing Nodes
         """
         available_nodes = set()
-        if current_node.is_compromised:
-            # Can only attack through outgoing connections
-            # I.e. need ability to write data to send payload
-            for outgoing_edge in current_node.outgoing_edges:
-                node = outgoing_edge.target
+        # if current_node.is_compromised:
+        # Can only attack through outgoing connections
+        # I.e. need ability to write data to send payload
+        for outgoing_edge in current_node.outgoing_edges:
+            node = outgoing_edge.target
+            # Don't revisit nodes that were unsucessfuly attacked
+            if node.is_worth_attacking() or node.is_compromised:
                 available_nodes.add(node)
         return available_nodes
+    
+    @staticmethod
+    def compromise_children(current_node:TreeNode):
+        for child in current_node.children:
+            child.compromise()
+            RandomAttacker.compromise_children(child)
 
     def random_walk_with_budget(self, current_node:TreeNode, time_available:float,
-                                attack_path:deque=deque(), nodes_compromised:set[TreeNode]=set(),
+                                nodes_compromised:set[TreeNode]=set(),
                                 max_can_compromise:int=1):
         """
         Recursively walk a graph, trying to any compromise components / nodes we come across.
@@ -70,7 +78,8 @@ class RandomAttacker(Attacker):
         Returns:
             set[Node]: Unique set of communication network components that have been compromised.
         """
-        attack_path.append(current_node.id)
+        if self.verbose:
+            print(f"--> {current_node.id}", end=" ")
         # Try to Compromise current node
         if current_node.is_compromised:
             is_successful, time_spent = True, 0
@@ -79,30 +88,24 @@ class RandomAttacker(Attacker):
         # Lose time spent trying to break this node
         time_available -= time_spent
         if is_successful:
+            RandomAttacker.compromise_children(current_node)
             nodes_compromised.add(current_node)
         # Still have time available, and haven't compromised entire network yet
         if time_available > 0 and len(nodes_compromised) < max_can_compromise:
-            available_nodes = RandomAttacker.next_available_nodes(current_node)
-            # Don't revisit nodes that were unsuccessfully attacked (not worth attacking)
-            next_nodes = [node for node in available_nodes if \
-                          node.is_worth_attacking() or node.is_compromised]
-            if len(next_nodes) == 0:
-                current_node.is_deadend = True
-                print([node.is_deadend for node in nodes_compromised])
-                next_nodes = list([node for node in nodes_compromised if not node.is_deadend])
+            next_nodes = list(RandomAttacker.next_available_nodes(current_node))
+            print([n.id for n in next_nodes])
             if len(next_nodes) > 0:
                 next_node = np.random.choice(next_nodes)
-                attack_path, new_nodes_compromised = \
+                nodes_compromised = nodes_compromised.union(
                     self.random_walk_with_budget(next_node, time_available,
-                                                 attack_path=attack_path,
                                                  nodes_compromised=nodes_compromised,
                                                  max_can_compromise=max_can_compromise)
-                nodes_compromised = nodes_compromised.union(new_nodes_compromised)
-            else:
-                attack_path.append("Dead End")
+                )
+            elif self.verbose: print("--> " + ("Dead End" if current_node.is_compromised else "Failed Attack"))
+        elif self.verbose: print("--> Ran out of Time")
     
         # If we've compromised all nodes, or have run out of time, stop.
-        return attack_path, nodes_compromised
+        return  nodes_compromised
     
     def attack_network(self, comm_network:CommNetwork):
         """
@@ -118,13 +121,14 @@ class RandomAttacker(Attacker):
         nodes_compromised = set()
         for entrypoint in comm_network.entrypoints:
             time_available = self.budget
-            attack_path, new_nodes_compromised = \
+            if self.verbose:
+                print("Attack Path:\nStart", end=" ")
+            nodes_compromised = nodes_compromised.union(
                 self.random_walk_with_budget(entrypoint, time_available,
-                                             attack_path = deque(),
                                              nodes_compromised=nodes_compromised,
                                              max_can_compromise=n_components)
-            nodes_compromised = nodes_compromised.union(new_nodes_compromised)
-            if self.verbose:
-                print(f"Attack Path:\n{' --> '.join([str(elt) for elt in attack_path])}")
+            )
+            # if self.verbose:
+            #     print(f"Attack Path:\n{' --> '.join([str(elt) for elt in attack_path])}")
 
 attacker = RandomAttacker(budget=52, verbose=True)

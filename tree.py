@@ -1,4 +1,5 @@
 import itertools
+from collections import OrderedDict
 
 class TreeNode():
 
@@ -25,31 +26,56 @@ class TreeNode():
         super().__init__(*args, **kwargs)
         self.name = name
         self.id = next(self.id_iter)
-        self.parent = parent
-        self.children = []
+        self.parents = set([parent] if parent is not None else [])
+        self.children = set()
+        self.is_leaf = True
         self.outgoing_edges = []
         self.incoming_edges = []
-
-    def set_parent(self, parent):
+    
+    def update_parents(self, *parents):
         """
-        Sets parents of current node in the tree.
+        Updates parents of current node in the tree.
 
         Args:
-            parent (TreeNode): Node 1 level above this one in the hierarchy.
+            parents (TreeNode): 1 or more nodes 1 level above this one in the hierarchy.
         """
-        self.parent = parent
-        self.parent.add_child(self)
+        self.parents.update(set(parents))
+        for parent in parents:
+            parent.update_children(self)
+    
+    def remove_parents(self, *parents):
+        """
+        Remove parents from current node in the tree.
 
-    def add_child(self, *children):
+        Args:
+            parents (TreeNode): 1 or more nodes 1 level above this one in the hierarchy.
         """
-        Adds 1 or more childern to this node instance.
+        for parent in parents:
+            parent.remove_children(self)
+        self.parents.difference_update(set(parents))
+        
+    def update_children(self, *children):
+        """
+        Updates children of this node instance. 
 
         Args:
             *children (TreeNode): 1 or more nodes below the current
                 one in the tree.
         """
-        self.children.extend(children)
+        self.children.update(set(children))
+        self.is_leaf = False
+    
+    def remove_children(self, *children):
+        """
+        Remove children from current node in the tree.
 
+        Args:
+            children (TreeNode): 1 or more nodes 1 level above this one in the hierarchy.
+        """
+        self.children.difference_update(set(children))
+        if len(self.children) == 0:
+            self.is_leaf = True
+    
     def add_outgoing_edge(self, other, edge):
         """
         Adds directed edge leading from this node to another one.
@@ -90,7 +116,15 @@ class TreeNode():
         Warning: There may still be edges present that point to/from this
         node to its children.
         """
-        self.children = []
+        self.children = set()
+    
+    def reset_parents(self):
+        """
+        Resets all parents.
+        Warning: There may still be edges present that point to/from this
+        node to its parents.
+        """
+        self.parents = set()
     
     def __str__(self):
         return f"{self.name}_{self.id}"

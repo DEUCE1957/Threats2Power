@@ -59,6 +59,7 @@ class CommNetwork(object):
     """
 
     def __init__(self, family_size=3, max_family_size_deviation=2, n_devices=20, 
+                 enable_sibling_to_sibling_comm:bool=False, 
                  n_entrypoints=3,
                  controller_prob=0.3, sensor_prob=0.9):
         """
@@ -69,6 +70,7 @@ class CommNetwork(object):
             family_size (int, optional): Average number of children per aggregator. Defaults to 3.
             max_family_size_deviation (int, optional): Random variation in the no. of children per aggregator. Defaults to 2.
             n_devices (int, optional): Number of end-devices which collect data or execute commands. Defaults to 20.
+            enable_sibling_to_sibling_comm (bool, optional): Whether to have lateral connections as well between nodes with the same parent
             n_entrypoints (int, optional): Number of entrypoints for attackers. Defaults to 3.
             controller_prob (float, optional): Probability that a device is a controller. Defaults to 0.3.
             sensor_prob (float, optional): Probability that a device is a sensor. Defaults to 0.9.
@@ -76,6 +78,7 @@ class CommNetwork(object):
         self.family_size = family_size
         self.max_family_size_deviation = max_family_size_deviation
         self.n_devices = n_devices
+        self.enable_sibling_to_sibling_comm = enable_sibling_to_sibling_comm
         self.n_entrypoints = n_entrypoints
         self.controller_prob = controller_prob
         self.sensor_prob = sensor_prob
@@ -114,15 +117,37 @@ class CommNetwork(object):
             self.n_components += len(components)
         elif len(components) > self.family_size:
             aggregators = []
-            for i, component in enumerate(components):
-                children_per_aggregator = max(1, (self.family_size + np.random.randint(-self.max_family_size_deviation, self.max_family_size_deviation)))
-                if i % children_per_aggregator == 0:
-                    aggregator = Aggregator(name="Aggregator",
-                                            is_accessible=False)
-                    aggregator.add_defence(CommmonDefences.hard_and_uncertain())
-                    aggregators.append(aggregator)
-                component.set_parent(aggregator)
-                CommNetwork.connect_by_edges(aggregator, component)
+
+            # Allocate no. of children/components to each Aggregator
+            children_per_aggregator = []
+            while (sum_so_far := sum(children_per_aggregator)) != len(components):
+                deviation = np.random.randint(-self.max_family_size_deviation, self.max_family_size_deviation)
+                at_least_1_child = max(1, (self.family_size + deviation))
+                n_children = min(at_least_1_child, len(components) - sum_so_far)
+                children_per_aggregator.append(n_children)
+
+                # Create the aggregator
+                aggregator = Aggregator(name="Aggregator", is_accessible=False)
+                aggregator.add_defence(CommmonDefences.hard_and_uncertain())
+                aggregators.append(aggregator)
+
+                for i, component in enumerate(components[sum_so_far:sum_so_far+n_children]):
+                    component.update_parents(aggregator)
+                    CommNetwork.connect_by_edges(aggregator, component)
+                    # Connect siblings
+                    if i >= 1 and self.enable_sibling_to_sibling_comm:
+                        prev_component = components[sum_so_far + (i-1)]
+                        CommNetwork.connect_by_edges(prev_component, component)
+            # for i, component in enumerate(components):
+            #     children_per_aggregator = max(1, (self.family_size + np.random.randint(-self.max_family_size_deviation, self.max_family_size_deviation)))
+            #     if i % children_per_aggregator == 0:
+            #         aggregator = Aggregator(name="Aggregator",
+            #                                 is_accessible=False)
+            #         aggregator.add_defence(CommmonDefences.hard_and_uncertain())
+            #         aggregators.append(aggregator)
+            #     component.update_parents(aggregator)
+            #     CommNetwork.connect_by_edges(aggregator, component)
+            #     # if len(aggregator.children) == children_per_aggregator:
             components = aggregators
             self.n_components += len(components)
         else:
@@ -130,8 +155,12 @@ class CommNetwork(object):
                               is_accessible=False)
             root.add_defence(CommmonDefences.very_hard_and_uncertain())
             for i, component in enumerate(components):
-                component.set_parent(root)
+                component.update_parents(root)
                 CommNetwork.connect_by_edges(root, component)
+                # Connect siblings
+                if i >= 1 and self.enable_sibling_to_sibling_comm:
+                    prev_component = components[i - 1]
+                    CommNetwork.connect_by_edges(prev_component, component)
             self.n_components += 1
             return root
         
@@ -162,7 +191,7 @@ class CommNetwork(object):
             for edge in child.outgoing_edges:
                 self.graph.add_edge(edge.source, edge.target)
             for edge in child.incoming_edges:
-                self.graph.add_edge(edge.source, edge.target)
+                self.graph.add_edge(edge.target, edge.source)
     
     def walk_and_set_entrypoints(self, root:Aggregator, idcs_to_match:np.ndarray, idx:int=0):
         """
@@ -187,22 +216,17 @@ class CommNetwork(object):
         return idx
     
     @staticmethod
-    def connect_by_edges(parent:Device|Aggregator, child:Device|Aggregator):
+    def connect_by_edges(source:Device|Aggregator, target:Device|Aggregator):
         """
-        Adds one-way or two-way communication edges depending on whether child is a sensor and/or controller or aggregator.
+        Adds two-way communication edges depending on whether child is a sensor and/or controller or aggregator.
+        TODO: One-way communication
 
         Args:
-            parent (Device|Aggregator): Component 1 level up in the communication hierarchy
-            child (Device|Aggregator): Component below parent in communication hierarchy
+            source (Device|Aggregator): Component to connect from
+            target (Device|Aggregator): Component to connect to
         """
-        if isinstance(child, Device):
-            if child.is_sensor:
-                parent.add_incoming_edge(child, Link(None, None))
-            if child.is_controller:
-                parent.add_outgoing_edge(child, Link(None, None))
-        else:
-            parent.add_incoming_edge(child, Link(None, None))
-            parent.add_outgoing_edge(child, Link(None, None))
+        source.add_incoming_edge(target, Link(None, None))
+        target.add_outgoing_edge(source, Link(None, None))
 
     @staticmethod
     def show_tree(root:Aggregator, s:str="", depth:int=0):
