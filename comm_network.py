@@ -14,9 +14,6 @@ class Aggregator(CyberComponent, TreeNode):
         The Aggregator can be hacked, which can also impact the reliability of all downstream data. 
         """
         super().__init__(*args, **kwargs)
-    
-    def aggregate(self):
-        pass
 
     def __str__(self):
         return f"{self.__name__}(id={self.id}, is_accessible={self.is_accessible})"
@@ -25,7 +22,7 @@ class Device(CyberComponent, TreeNode):
 
     __name__ = "Device"
 
-    def __init__(self, is_controller:bool, is_sensor:bool, *args, **kwargs) -> None:
+    def __init__(self, is_controller:bool, is_sensor:bool, is_autonomous:bool=False, *args, **kwargs) -> None:
         """
         Generic communication network component that collects data and/or acts in the real world.
         The device can be hacked, which impacts the trustworthiness of the data the device emits.
@@ -35,20 +32,17 @@ class Device(CyberComponent, TreeNode):
                 such as the power output of battery
             is_sensor (bool): Whether the device collects data about a real-world object,
                 such as the state of charge of a battery
+            is_autonomous (bool): Whether the device can independently make decisions
+                such as when to charge the battery. Always false is device is not a controller.
         """
         super().__init__(*args, **kwargs)
         self.is_controller = is_controller
+        self.is_autonomous = False if not self.is_controller else is_autonomous
         self.is_sensor = is_sensor
-    
-    def collect(self):
-        pass
-
-    def act(self):
-        pass
 
     def __str__(self):
         return (f"{self.__name__}(id={self.id}, is_controller={self.is_controller}, " +
-                f"is_sensor={self.is_sensor}, is_accessible={self.is_accessible})")
+                f"is_autonomous={self.is_autonomous}, is_sensor={self.is_sensor}, is_accessible={self.is_accessible})")
 
 @total_ordering
 class LevelOfRedundancy(Enum):
@@ -60,21 +54,19 @@ class LevelOfRedundancy(Enum):
     NONE = -1
     FULL = 2
    
-    def __eq__(self, other):
+    def __eq__(self, other:object) -> bool:
         if self.__class__ is other.__class__:
             return self.value == other.value
         elif isinstance(self, LevelOfRedundancy):
             return self.value == other
         raise NotImplementedError
     
-    def __lt__(self, other):
+    def __lt__(self, other:object) -> bool:
         if self.__class__ is other.__class__:
             return self.value < other.value
         elif isinstance(self, LevelOfRedundancy):
             return self.value < other
         raise NotImplementedError
-    
-
 
 class CommNetwork(object):
 
@@ -85,11 +77,12 @@ class CommNetwork(object):
     and compromise the network, such as a Remote connection to a substation.
     """
 
-    def __init__(self, n_devices=20, redundancy=3, redundancy_deviation=2,
-                 # redundancy=Redundancy.RANDOM,
+    def __init__(self, n_devices:int=20,
+                 redundancy:int|LevelOfRedundancy=3, redundancy_deviation:int=2,
+                 network_type:str="metering",
                  enable_sibling_to_sibling_comm:bool=False,
-                 n_entrypoints=3,
-                 controller_prob=0.3, sensor_prob=0.9):
+                 n_entrypoints:int=3,
+                 controller_prob:float=0.3, sensor_prob:float=0.9):
         """
         The topology of the communication network is procedurally generated based on the
         parameters set here.
@@ -104,6 +97,9 @@ class CommNetwork(object):
             redundancy_deviation (int, optional):
                 Random variation in the redundancy, ignored if redundancy is NONE or FULL.
                 Defaults to 2.
+            network_type (str, optional):
+                Type of network to generate, must be one of ["metering", "SCADA"].
+                Defaults to "meter".
             enable_sibling_to_sibling_comm (bool, optional):
                 Whether to have lateral connections as well between nodes with the same parent.
                 Defaults to False.
@@ -129,6 +125,7 @@ class CommNetwork(object):
             self.redundancy = redundancy
             self.redundancy_deviation = redundancy_deviation
         
+        self.network_type = network_type
         self.enable_sibling_to_sibling_comm = enable_sibling_to_sibling_comm
         self.n_entrypoints = n_entrypoints
         self.controller_prob = controller_prob
@@ -219,8 +216,7 @@ class CommNetwork(object):
                 prev_component = components[i - 1]
                 CommNetwork.connect_by_edges(prev_component, component)
         return root
-            
-
+        
     def build_network(self, components:list[Device|Aggregator]):
         """
         Recursively build Communication Network composed of Devices and Aggregators.
