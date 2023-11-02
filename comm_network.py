@@ -1,5 +1,7 @@
 import numpy as np
 import networkx as nx
+from enum import Enum
+from functools import total_ordering
 from tree import TreeNode, Link
 from cyber import CyberComponent, CommmonDefences
 
@@ -48,18 +50,44 @@ class Device(CyberComponent, TreeNode):
         return (f"{self.__name__}(id={self.id}, is_controller={self.is_controller}, " +
                 f"is_sensor={self.is_sensor}, is_accessible={self.is_accessible})")
 
+@total_ordering
+class LevelOfRedundancy(Enum):
+    """
+    Level of Redundancy in a Network.
+    NONE: No redundancy, single point of failure.
+    FULL: Maximize redundancy
+    """
+    NONE = -1
+    FULL = 2
+   
+    def __eq__(self, other):
+        if self.__class__ is other.__class__:
+            return self.value == other.value
+        elif isinstance(self, LevelOfRedundancy):
+            return self.value == other
+        raise NotImplementedError
+    
+    def __lt__(self, other):
+        if self.__class__ is other.__class__:
+            return self.value < other.value
+        elif isinstance(self, LevelOfRedundancy):
+            return self.value < other
+        raise NotImplementedError
+    
+
 
 class CommNetwork(object):
 
     """
-    Procedurally generated communication network composed of Defices and Aggregators.
+    Procedurally generated communication network composed of Devices and Aggregators.
     Each aggregator has a certain amount of children (can be devices, or other aggregators).
     Entry points are points in the network that can potentially be used by attackers to try
     and compromise the network, such as a Remote connection to a substation.
     """
 
-    def __init__(self, family_size=3, max_family_size_deviation=2, n_devices=20, 
-                 enable_sibling_to_sibling_comm:bool=False, 
+    def __init__(self, n_devices=20, redundancy=3, redundancy_deviation=2,
+                 # redundancy=Redundancy.RANDOM,
+                 enable_sibling_to_sibling_comm:bool=False,
                  n_entrypoints=3,
                  controller_prob=0.3, sensor_prob=0.9):
         """
@@ -67,17 +95,40 @@ class CommNetwork(object):
         parameters set here.
 
         Args:
-            family_size (int, optional): Average number of children per aggregator. Defaults to 3.
-            max_family_size_deviation (int, optional): Random variation in the no. of children per aggregator. Defaults to 2.
-            n_devices (int, optional): Number of end-devices which collect data or execute commands. Defaults to 20.
-            enable_sibling_to_sibling_comm (bool, optional): Whether to have lateral connections as well between nodes with the same parent
-            n_entrypoints (int, optional): Number of entrypoints for attackers. Defaults to 3.
-            controller_prob (float, optional): Probability that a device is a controller. Defaults to 0.3.
-            sensor_prob (float, optional): Probability that a device is a sensor. Defaults to 0.9.
+            n_devices (int, optional):
+                Number of end-devices which collect data or execute commands.
+                Defaults to 20.
+            redundancy (int, optional):
+                Level of redundancy in the network, i..e the no. of children per aggregator.
+                Defaults to 3.
+            redundancy_deviation (int, optional):
+                Random variation in the redundancy, ignored if redundancy is NONE or FULL.
+                Defaults to 2.
+            enable_sibling_to_sibling_comm (bool, optional):
+                Whether to have lateral connections as well between nodes with the same parent.
+                Defaults to False.
+            n_entrypoints (int, optional):
+                Number of entrypoints for attackers.
+                Defaults to 3.
+            controller_prob (float, optional):
+                Probability that a device is a controller.
+                Defaults to 0.3.
+            sensor_prob (float, optional):
+                Probability that a device is a sensor.
+                Defaults to 0.9.
         """
-        self.family_size = family_size
-        self.max_family_size_deviation = max_family_size_deviation
         self.n_devices = n_devices
+
+        # Redundancy (no. of children per aggregator)
+        self.redundancy_deviation = 0
+        if redundancy == LevelOfRedundancy.NONE:
+            self.redundancy = self.n_devices
+        elif redundancy == LevelOfRedundancy.FULL:
+            self.redundancy = LevelOfRedundancy.FULL.value
+        else:
+            self.redundancy = redundancy
+            self.redundancy_deviation = redundancy_deviation
+        
         self.enable_sibling_to_sibling_comm = enable_sibling_to_sibling_comm
         self.n_entrypoints = n_entrypoints
         self.controller_prob = controller_prob
@@ -88,8 +139,87 @@ class CommNetwork(object):
         self.root = self.build_network(components=[])
         self.entrypoints = []
         self.add_entrypoints()
-        self.graph = nx.DiGraph()
-        self.build_graph(self.root)
+        self.graph = self.build_graph(self.root, nx.DiGraph())
+
+    def build_leaves(self):
+        """
+        Construct the leaf nodes of the network. Leaf nodes have no children.
+
+        Returns:
+            list[TreeNode]: Collection of leaf nodes
+        """
+        components = []
+        for _ in range(self.n_devices):
+            is_sensor = np.random.choice([True, False], p=[self.sensor_prob, 1-self.sensor_prob])
+            is_controller = np.random.choice([True, False], p=[self.controller_prob, 1-self.controller_prob])
+            if not is_controller and not is_sensor:
+                is_sensor = True if self.sensor_prob >= self.controller_prob else False
+                is_controller = True if self.controller_prob > self.sensor_prob else False
+            device = Device(name="Device",
+                            is_controller=is_controller,
+                            is_sensor=is_sensor,
+                            is_accessible=False)
+            device.add_defence(CommmonDefences.easy_and_uncertain())
+            components.append(device)
+        return components
+    
+    def build_aggregators(self, components:list[TreeNode]):
+        """
+        Construct the aggregator nodes of the network. Each aggregator node oversees 1 or
+        more components 1 level below it in the hierarchy. 
+
+        Args:
+            components (list[TreeNode]): Nodes 1 level lower in the hierarchy.
+
+        Returns:
+            list[TreeNode]: Collection of aggregator nodes
+        """
+        aggregators = []
+
+        # Allocate no. of children/components to each Aggregator
+        children_per_aggregator = []
+        while (sum_so_far := sum(children_per_aggregator)) != len(components):
+            deviation = np.random.randint(-self.redundancy_deviation, self.redundancy_deviation + 1)
+            at_least_1_child = max(1, (self.redundancy + deviation))
+            n_children = min(at_least_1_child, len(components) - sum_so_far)
+            children_per_aggregator.append(n_children)
+
+            # Create the aggregator
+            aggregator = Aggregator(name="Aggregator", is_accessible=False)
+            aggregator.add_defence(CommmonDefences.hard_and_uncertain())
+            aggregators.append(aggregator)
+
+            for i, component in enumerate(components[sum_so_far:sum_so_far+n_children]):
+                component.update_parents(aggregator)
+                CommNetwork.connect_by_edges(aggregator, component)
+                # Connect siblings
+                if i >= 1 and self.enable_sibling_to_sibling_comm:
+                    prev_component = components[sum_so_far + (i-1)]
+                    CommNetwork.connect_by_edges(prev_component, component)
+        return aggregators
+    
+    def build_root(self, components:list[TreeNode]):
+        """
+        Construct the root node of the network.
+
+        Args:
+            components (list[TreeNode]): Nodes one level below the root in the hierarchy.
+
+        Returns:
+            TreeNode: Root of the communication network
+        """
+        root = Aggregator(name="ControlCenter",
+                    is_accessible=False)
+        root.add_defence(CommmonDefences.very_hard_and_uncertain())
+        for i, component in enumerate(components):
+            component.update_parents(root)
+            CommNetwork.connect_by_edges(root, component)
+            # Connect siblings
+            if i >= 1 and self.enable_sibling_to_sibling_comm:
+                prev_component = components[i - 1]
+                CommNetwork.connect_by_edges(prev_component, component)
+        return root
+            
 
     def build_network(self, components:list[Device|Aggregator]):
         """
@@ -101,69 +231,16 @@ class CommNetwork(object):
         Returns:
             Aggregator: Root node of tree (represents control center)
         """
-        if components == []:
-            for _ in range(self.n_devices):
-                is_sensor = np.random.choice([True, False], p=[self.sensor_prob, 1-self.sensor_prob])
-                is_controller = np.random.choice([True, False], p=[self.controller_prob, 1-self.controller_prob])
-                if not is_controller and not is_sensor:
-                    is_sensor = True if self.sensor_prob >= self.controller_prob else False
-                    is_controller = True if self.controller_prob > self.sensor_prob else False
-                device = Device(name="Device",
-                                is_controller=is_controller,
-                                is_sensor=is_sensor,
-                                is_accessible=False)
-                device.add_defence(CommmonDefences.easy_and_uncertain())
-                components.append(device)
+        if len(components) == 0:
+            components = self.build_leaves()
             self.n_components += len(components)
-        elif len(components) > self.family_size:
-            aggregators = []
-
-            # Allocate no. of children/components to each Aggregator
-            children_per_aggregator = []
-            while (sum_so_far := sum(children_per_aggregator)) != len(components):
-                deviation = np.random.randint(-self.max_family_size_deviation, self.max_family_size_deviation)
-                at_least_1_child = max(1, (self.family_size + deviation))
-                n_children = min(at_least_1_child, len(components) - sum_so_far)
-                children_per_aggregator.append(n_children)
-
-                # Create the aggregator
-                aggregator = Aggregator(name="Aggregator", is_accessible=False)
-                aggregator.add_defence(CommmonDefences.hard_and_uncertain())
-                aggregators.append(aggregator)
-
-                for i, component in enumerate(components[sum_so_far:sum_so_far+n_children]):
-                    component.update_parents(aggregator)
-                    CommNetwork.connect_by_edges(aggregator, component)
-                    # Connect siblings
-                    if i >= 1 and self.enable_sibling_to_sibling_comm:
-                        prev_component = components[sum_so_far + (i-1)]
-                        CommNetwork.connect_by_edges(prev_component, component)
-            # for i, component in enumerate(components):
-            #     children_per_aggregator = max(1, (self.family_size + np.random.randint(-self.max_family_size_deviation, self.max_family_size_deviation)))
-            #     if i % children_per_aggregator == 0:
-            #         aggregator = Aggregator(name="Aggregator",
-            #                                 is_accessible=False)
-            #         aggregator.add_defence(CommmonDefences.hard_and_uncertain())
-            #         aggregators.append(aggregator)
-            #     component.update_parents(aggregator)
-            #     CommNetwork.connect_by_edges(aggregator, component)
-            #     # if len(aggregator.children) == children_per_aggregator:
-            components = aggregators
+        elif len(components) > self.redundancy:
+            components = self.build_aggregators(components)
             self.n_components += len(components)
         else:
-            root = Aggregator(name="ControlCenter",
-                              is_accessible=False)
-            root.add_defence(CommmonDefences.very_hard_and_uncertain())
-            for i, component in enumerate(components):
-                component.update_parents(root)
-                CommNetwork.connect_by_edges(root, component)
-                # Connect siblings
-                if i >= 1 and self.enable_sibling_to_sibling_comm:
-                    prev_component = components[i - 1]
-                    CommNetwork.connect_by_edges(prev_component, component)
+            root = self.build_root(components)
             self.n_components += 1
             return root
-        
         return self.build_network(components)
     
     def add_entrypoints(self):
@@ -176,7 +253,7 @@ class CommNetwork(object):
                                                  replace=False)
         self.walk_and_set_entrypoints(self.root, idcs_to_match=accessible_components, idx=0)
     
-    def build_graph(self, root:Aggregator):
+    def build_graph(self, root:Aggregator, graph:nx.DiGraph):
         """
         Construct NetworkX Graph from connected Aggregators / Devices
 
@@ -185,13 +262,14 @@ class CommNetwork(object):
         Returns:
             networkx.DiGraph: Directional NetworkX Graph, with added nodes/edges
         """
-        self.graph.add_node(root)
+        graph.add_node(root)
         for child in root.children:
-            self.build_graph(child)
+            graph = self.build_graph(child, graph)
             for edge in child.outgoing_edges:
-                self.graph.add_edge(edge.source, edge.target)
+                graph.add_edge(edge.source, edge.target)
             for edge in child.incoming_edges:
-                self.graph.add_edge(edge.target, edge.source)
+                graph.add_edge(edge.target, edge.source)
+        return graph
     
     def walk_and_set_entrypoints(self, root:Aggregator, idcs_to_match:np.ndarray, idx:int=0):
         """
