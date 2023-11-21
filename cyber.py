@@ -199,7 +199,7 @@ class CyberComponent():
         self.is_deadend = False
         self.total_effort_spent = 0.0
         self.defences = OrderedDict()
-
+    
     def attack(self, budget:float) -> (bool, float):
         """
         Attack this component with a certain time budget available. Note that time is not an exact measure.
@@ -228,6 +228,19 @@ class CyberComponent():
             self.is_compromised = True
         self.total_effort_spent += effort_spent
         return is_successful, effort_spent
+    
+    def get_prob_to_compromise(self):
+        """
+        Calculate the probability (given infinite effort) to 
+        successfully compromise this device.
+
+        Returns:
+            float: probability between 0.0 and 1.0
+        """
+        p = 1.0
+        for defence in self.defences.values():
+            p *= defence.p
+        return p
     
     def compromise(self):
         """
