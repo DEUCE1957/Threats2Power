@@ -66,6 +66,7 @@ class Defence():
         self.vulnerability = vulnerability
         self.success_distr = success_distribution
         self.p = p
+        self.effort_distribution = effort_distribution
         self.effort_to_compromise = effort_distribution.rvs()
         self.is_compromised = False
         # Total time/effort spent attacking this defence

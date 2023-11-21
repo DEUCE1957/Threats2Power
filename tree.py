@@ -75,6 +75,15 @@ class TreeNode():
         self.children.difference_update(set(children))
         if len(self.children) == 0:
             self.is_leaf = True
+
+    def get_neighbours(self):
+        """
+        Get all the neighbours of the current node in the tree.
+
+        Returns:
+            set[TreeNode]: Set containing all unique neighbours of this node
+        """
+        return self.children.union(self.parents)
     
     def add_outgoing_edge(self, other, edge):
         """
