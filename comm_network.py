@@ -259,12 +259,12 @@ class CommNetwork(object):
             networkx.DiGraph: Directional NetworkX Graph, with added nodes/edges
         """
         graph.add_node(root)
+        for edge in root.outgoing_edges:
+            graph.add_edge(edge.source, edge.target)
+        for edge in root.incoming_edges:
+            graph.add_edge(edge.target, edge.source)
         for child in root.children:
             graph = self.build_graph(child, graph)
-            for edge in child.outgoing_edges:
-                graph.add_edge(edge.source, edge.target)
-            for edge in child.incoming_edges:
-                graph.add_edge(edge.target, edge.source)
         return graph
     
     def walk_and_set_entrypoints(self, root:Aggregator, idcs_to_match:np.ndarray, idx:int=0):
