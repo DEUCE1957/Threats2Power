@@ -289,6 +289,17 @@ class CommNetwork(object):
             idx = self.walk_and_set_entrypoints(child, idcs_to_match, idx=idx)
         return idx
     
+    def reset(self, active_node=None):
+        """
+        Recursively reset the cyber security status of all components in
+        the network, starts from the root node.
+        """
+        if active_node is None:
+            active_node = self.root
+        active_node.reset()
+        for child in active_node.children:
+            self.reset(child)
+    
     @staticmethod
     def connect_by_edges(source:Device|Aggregator, target:Device|Aggregator):
         """
@@ -320,4 +331,3 @@ class CommNetwork(object):
         for child in root.children:
             s = CommNetwork.show_tree(child, s=s, depth=depth+1)
         return s
-        

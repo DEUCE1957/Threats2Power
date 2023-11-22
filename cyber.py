@@ -70,7 +70,7 @@ class Defence():
         self.effort_to_compromise = effort_distribution.rvs()
         self.is_compromised = False
         # Total time/effort spent attacking this defence
-        self.effort_spent = 0
+        self.effort_spent = 0.0
 
     def remove_vulnerability(self):
         self.vulnerability = Vulnerability("NoVulnerability")
@@ -131,7 +131,12 @@ class Defence():
         Compromise this defence, regardless of difficulty or success rate. 
         Automatically invoked when a parent node is compromised.
         """
-        self.is_compromised= True
+        self.is_compromised = True
+
+    def reset(self):
+        self.is_compromised = False
+        self.effort_spent = 0.0
+        self.effort_to_compromise = self.effort_distribution.rvs()
 
 class CommmonDefences():
     """
@@ -196,7 +201,6 @@ class CyberComponent():
         super().__init__(*args, **kwargs)
         self.is_accessible = is_accessible
         self.is_compromised = is_compromised
-        self.is_deadend = False
         self.total_effort_spent = 0.0
         self.defences = OrderedDict()
     
@@ -329,3 +333,9 @@ class CyberComponent():
             self.defences[name].remove_vulnerability()
             return True
         return False
+
+    def reset(self):
+        self.is_compromised = False
+        self.total_effort_spent = 0.0
+        for name in self.defences:
+            self.defences[name].reset()
