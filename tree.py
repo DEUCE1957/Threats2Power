@@ -83,7 +83,12 @@ class TreeNode():
         Returns:
             set[TreeNode]: Set containing all unique neighbours of this node
         """
-        return self.children.union(self.parents)
+        neighbours = set()
+        for edge in self.outgoing_edges:
+            neighbours.add(edge.target)
+        for edge in self.incoming_edges:
+            neighbours.add(edge.source)
+        return neighbours
     
     def add_outgoing_edge(self, other, edge):
         """
