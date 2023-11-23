@@ -1,0 +1,73 @@
+{
+    "device": [
+        {"name": "Meter",
+         "is_sensor": true,
+         "is_controller": false,
+         "is_autonomous": false,
+         "defences": [
+            {
+                "name": "Defence",
+                "p": 0.2,
+                "effort": {
+                    "distr": "expon",
+                    "scale": 10,
+                    "loc": 0
+                }
+            }
+         ],
+         "vulnerabilities": []
+        },
+        {"name": "Smart Meter",
+         "is_sensor": true,
+         "is_controller": true,
+         "is_autonomous": false,
+         "defences": [
+            {
+                "name": "Defence",
+                "p": 0.3,
+                "effort": {
+                    "distr": "expon",
+                    "scale": 5,
+                    "loc": 0
+                }
+            }
+            
+         ],
+         "vulnerabilities": []
+        }
+    ],
+        
+    "aggregator": {
+        "name": "Concentrator",
+        "is_accessible": false,
+        "defences": [
+            {
+                "name": "Defence",
+                "p": 0.1,
+                "effort": {
+                    "distr": "expon",
+                    "scale": 10,
+                    "loc": 0
+                }
+            }
+        ],
+        "vulnerabilities": []
+    },
+
+    "root": {
+        "name": "Operation Center",
+        "is_accessible": false,
+        "defences": [
+            {
+                "name": "Defence",
+                "p": 0.01,
+                "effort": {
+                    "distr": "expon",
+                    "scale": 100,
+                    "loc": 0
+                }
+            }
+        ],
+        "vulnerabilities": []
+    }
+}
