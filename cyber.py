@@ -174,7 +174,7 @@ class CommmonDefences():
        
     @classmethod
     def impossible(cls) -> Defence:
-        """0% chance to succeed and will no effort to try and break."""
+        """0% chance to succeed and will take no effort to try and break."""
         return Defence("Impossible", p=0)
 
 class CyberComponent():

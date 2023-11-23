@@ -53,12 +53,19 @@ class RandomAttacker(Attacker):
         return available_nodes
     
     @staticmethod
-    def compromise_children(current_node:TreeNode):
+    def compromise_children(current_node:TreeNode, nodes_compromised):
+        """Recursively compromise all children of the current node"""
         for child in current_node.children:
             child.compromise()
-            RandomAttacker.compromise_children(child)
+            nodes_compromised.add(child)
+            nodes_compromised.union(
+                RandomAttacker.compromise_children(child, nodes_compromised)
+            )
+        return nodes_compromised
 
     def random_walk_with_budget(self, current_node:TreeNode, time_available:float,
+                                nodes_available:set[TreeNode]=set(),
+                                nodes_visited:set[TreeNode]=set(),
                                 nodes_compromised:set[TreeNode]=set(),
                                 max_can_compromise:int=1):
         """
@@ -70,7 +77,11 @@ class RandomAttacker(Attacker):
 
         Args:
             current_node (Node): The active node
-            time_available (float): Time available to try and compromise Nodes.
+            time_available (float): Time available to try and compromise Nodes
+            nodes_available (set[Node], optional): Unique set of nodes in the communication network that 
+                have can be visited from the currently compromised set of nodes. Defaults to empty set.
+            nodes_visited (set[Node], optional): Unique set of nodes in the communication network that 
+                have been visited so far. Defaults to empty set.
             nodes_compromised (set[Node], optional): Unique set of nodes in the communication network that 
                 have been compromised so far. Defaults to empty set.
             max_can_compromise (int, optional): Maximum no. of components that can be compromised. Defaults to 1.
@@ -80,6 +91,7 @@ class RandomAttacker(Attacker):
         """
         if self.verbose:
             print(f"--> {current_node.id}", end=" ")
+        nodes_visited.add(current_node)
         # Try to Compromise current node
         if current_node.is_compromised:
             is_successful, time_spent = True, 0
@@ -88,17 +100,21 @@ class RandomAttacker(Attacker):
         # Lose time spent trying to break this node
         time_available -= time_spent
         if is_successful:
-            RandomAttacker.compromise_children(current_node)
+            nodes_available.update(current_node.get_neighbours())
             nodes_compromised.add(current_node)
+        nodes_available.difference_update(nodes_visited)
         # Still have time available, and haven't compromised entire network yet
         if time_available > 0 and len(nodes_compromised) < max_can_compromise:
-            next_nodes = list(RandomAttacker.next_available_nodes(current_node))
-            if len(next_nodes) > 0:
+            next_nodes = list(nodes_available)
+            if len(nodes_available) > 0:
                 next_node = np.random.choice(next_nodes)
-                additional_nodes_compromised, _ = self.random_walk_with_budget(next_node, time_available,
-                                                 nodes_compromised=nodes_compromised,
-                                                 max_can_compromise=max_can_compromise)
-                nodes_compromised = nodes_compromised.union(additional_nodes_compromised)
+                (additional_nodes_compromised,
+                 _) = self.random_walk_with_budget(next_node, time_available,
+                                                   nodes_available=nodes_available,
+                                                   nodes_visited=nodes_visited,
+                                                   nodes_compromised=nodes_compromised,
+                                                   max_can_compromise=max_can_compromise)
+                nodes_compromised.update(additional_nodes_compromised)
             elif self.verbose: print("--> " + ("Dead End" if current_node.is_compromised else "Failed Attack"))
         elif self.verbose: print("--> Ran out of Time")
     
@@ -122,9 +138,13 @@ class RandomAttacker(Attacker):
             effort_available = self.budget
             if self.verbose:
                 print("Attack Path:\nStart", end=" ")
-            additional_nodes_compromised, effort_leftover = self.random_walk_with_budget(entrypoint, effort_available,
-                                             nodes_compromised=nodes_compromised,
-                                             max_can_compromise=n_components)
-            nodes_compromised = nodes_compromised.union(additional_nodes_compromised)
+            (additional_nodes_compromised,
+             effort_leftover) = self.random_walk_with_budget(
+                                    entrypoint, effort_available,
+                                    nodes_available=set(),
+                                    nodes_visited=set(),
+                                    nodes_compromised=nodes_compromised,
+                                    max_can_compromise=n_components)
+            nodes_compromised.update(additional_nodes_compromised)
             total_effort_spent += (effort_available - effort_leftover)
         return nodes_compromised, total_effort_spent
