@@ -1,73 +1,33 @@
-{
-    "device": [
-        {"name": "Meter",
-         "is_sensor": true,
-         "is_controller": false,
-         "is_autonomous": false,
-         "defences": [
-            {
-                "name": "Defence",
-                "p": 0.2,
-                "effort": {
-                    "distr": "expon",
-                    "scale": 10,
-                    "loc": 0
-                }
-            }
-         ],
-         "vulnerabilities": []
-        },
-        {"name": "Smart Meter",
-         "is_sensor": true,
-         "is_controller": true,
-         "is_autonomous": false,
-         "defences": [
-            {
-                "name": "Defence",
-                "p": 0.3,
-                "effort": {
-                    "distr": "expon",
-                    "scale": 5,
-                    "loc": 0
-                }
-            }
-            
-         ],
-         "vulnerabilities": []
-        }
-    ],
-        
-    "aggregator": {
-        "name": "Concentrator",
-        "is_accessible": false,
-        "defences": [
-            {
-                "name": "Defence",
-                "p": 0.1,
-                "effort": {
-                    "distr": "expon",
-                    "scale": 10,
-                    "loc": 0
-                }
-            }
-        ],
-        "vulnerabilities": []
-    },
-
-    "root": {
-        "name": "Operation Center",
-        "is_accessible": false,
-        "defences": [
-            {
-                "name": "Defence",
-                "p": 0.01,
-                "effort": {
-                    "distr": "expon",
-                    "scale": 100,
-                    "loc": 0
-                }
-            }
-        ],
-        "vulnerabilities": []
-    }
-}
+{"device": [{"name": "Meter",
+   "is_sensor": true,
+   "is_controller": false,
+   "is_autonomous": false,
+   "defences": [{"name": "Defence",
+     "success": {"distribution": {"name": "bernoulli", "kwds": {"p": 0.2}}},
+     "effort": {"distribution": {"name": "expon",
+       "kwds": {"loc": 0, "scale": 10}}}}],
+   "vulnerabilities": []},
+  {"name": "Smart Meter",
+   "is_sensor": true,
+   "is_controller": true,
+   "is_autonomous": false,
+   "defences": [{"name": "Defence",
+     "success": {"distribution": {"name": "bernoulli", "kwds": {"p": 0.5}}},
+     "p": 0.3,
+     "effort": {"distribution": {"name": "expon",
+       "kwds": {"loc": 0, "scale": 5}}}}],
+   "vulnerabilities": []}],
+ "aggregator": {"name": "Concentrator",
+  "is_accessible": false,
+  "defences": [{"name": "Defence",
+    "success": {"distribution": {"name": "bernoulli", "kwds": {"p": 0.1}}},
+    "effort": {"distribution": {"name": "expon",
+      "kwds": {"loc": 0, "scale": 10}}}}],
+  "vulnerabilities": []},
+ "root": {"name": "Operation Center",
+  "is_accessible": false,
+  "defences": [{"name": "Defence",
+    "success": {"distribution": {"name": "bernoulli", "kwds": {"p": 0.01}}},
+    "effort": {"distribution": {"name": "expon",
+      "kwds": {"loc": 0, "scale": 100}}}}],
+  "vulnerabilities": []}}
