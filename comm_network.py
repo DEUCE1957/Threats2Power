@@ -176,35 +176,51 @@ class CommNetwork(object):
         """
         aggregators = []
 
-        # Allocate no. of children/components to each Aggregator
+        # Allocate children/components to each Aggregator
         children_per_aggregator = []
+        skipped_children = []
         while (sum_so_far := sum(children_per_aggregator)) != len(components):
-            deviation = np.random.randint(-self.child_no_deviation, self.child_no_deviation + 1)
-            at_least_1_child = max(1, (self.children_per_parent + deviation))
-            n_children = min(at_least_1_child, len(components) - sum_so_far)
-            children_per_aggregator.append(n_children)
+            # Allow some variation in no. of children
+            if self.child_no_deviation > 0:
+                random_deviation = np.random.randint(-self.child_no_deviation, self.child_no_deviation + 1)
+            else:
+                random_deviation = 0
+            # No. of children per aggregator (can be negative)
+            n_children = self.children_per_parent + random_deviation
+            
+            if n_children < 0: # Negative cannot exceed remaining no. of components
+                n_children = max(n_children, sum_so_far - len(components))
+            else: # Positive must at least be 1, up to the maximum no. of remaining components
+                n_children = max(1, min(n_children, len(components) - sum_so_far))
+            children_per_aggregator.append(np.abs(n_children)) 
 
-            # Create the aggregator
-            aggregator_type = np.random.choice(self.specs["aggregator"]["types"],
-                                               p=self.specs["aggregator"].get("commonness",None))
-            aggregator_attrs =  CommNetwork.get_binary_attributes(aggregator_type, ["is_accessible"])
-            aggregator = Aggregator(name=aggregator_type.get("name", "Aggregator"),
-                                    is_accessible=aggregator_attrs["is_accessible"])
-            CommNetwork.attach_cyber_characteristics(aggregator, aggregator_type)
-        
-            # Connects Edges
-            for i, component in enumerate(components[sum_so_far:sum_so_far+n_children]):
-                component.update_parents(aggregator)
-                CommNetwork.connect_by_edges(aggregator, component)
-                # Connect siblings
-                if i >= 1 and self.enable_sibling_to_sibling_comm:
-                    prev_component = components[sum_so_far + (i-1)]
-                    CommNetwork.connect_by_edges(prev_component, component)
+            if n_children <= 1: # Assign children to higher level in hierarchy
+                skipped_children.extend(components[sum_so_far:sum_so_far+np.abs(n_children)] if \
+                                        np.abs(n_children) > 1 else [components[sum_so_far]])
+            else: # Assign children to a new aggregator
+                # Create the aggregator
+                aggregator_type = np.random.choice(self.specs["aggregator"]["types"],
+                                                p=self.specs["aggregator"].get("commonness",None))
+                aggregator_attrs =  CommNetwork.get_binary_attributes(aggregator_type, ["is_accessible"])
+                aggregator = Aggregator(name=aggregator_type.get("name", "Aggregator"),
+                                        is_accessible=aggregator_attrs["is_accessible"])
+                CommNetwork.attach_cyber_characteristics(aggregator, aggregator_type)
+            
+                # Connects Edges
+                for i, component in enumerate(components[sum_so_far:sum_so_far+n_children]):
+                    component.update_parents(aggregator)
+                    CommNetwork.connect_by_edges(aggregator, component)
+                    # Connect siblings
+                    if i >= 1 and self.enable_sibling_to_sibling_comm:
+                        prev_component = components[sum_so_far + (i-1)]
+                        if prev_component.__class__ == component.__class__:
+                            CommNetwork.connect_by_edges(prev_component, component)
 
-            # Keep Track of Nodes
-            aggregators.append(aggregator)
-            self.node_ids.append(aggregator.id)
-            self.id_to_node[aggregator.id] = aggregator
+                # Keep Track of Nodes
+                aggregators.append(aggregator)
+                self.node_ids.append(aggregator.id)
+                self.id_to_node[aggregator.id] = aggregator
+        aggregators.extend(skipped_children)
         return aggregators
     
     def build_root(self, components:list[TreeNode]):
@@ -230,7 +246,8 @@ class CommNetwork(object):
             # Connect siblings
             if i >= 1 and self.enable_sibling_to_sibling_comm:
                 prev_component = components[i - 1]
-                CommNetwork.connect_by_edges(prev_component, component)
+                if prev_component.__class__ == component.__class__:
+                    CommNetwork.connect_by_edges(prev_component, component)
         return root
         
     def build_network(self, components:list[Device|Aggregator]):
@@ -246,7 +263,7 @@ class CommNetwork(object):
         if len(components) == 0:
             components = self.build_leaves()
             self.n_components += len(components)
-        elif len(components) > self.children_per_parent:
+        elif len(components) > 1:
             components = self.build_aggregators(components)
             self.n_components += len(components)
         else:
