@@ -1,9 +1,12 @@
+import json
 import numpy as np
 import networkx as nx
 from enum import Enum
 from functools import total_ordering
+from pathlib import Path as p
 from tree import TreeNode, Link
-from cyber import CyberComponent, CommmonDefences
+from cyber import CyberComponent, CommmonDefences, Defence, Vulnerability
+from network_specification import SpecDecoder
 
 class Aggregator(CyberComponent, TreeNode):
     __name__ = "Aggregator"
@@ -16,7 +19,7 @@ class Aggregator(CyberComponent, TreeNode):
         super().__init__(*args, **kwargs)
 
     def __str__(self):
-        return f"{self.__name__}(id={self.id}, is_accessible={self.is_accessible})"
+        return f"{self.name}(id={self.id}, is_accessible={self.is_accessible})"
 
 class Device(CyberComponent, TreeNode):
 
@@ -41,7 +44,7 @@ class Device(CyberComponent, TreeNode):
         self.is_sensor = is_sensor
 
     def __str__(self):
-        return (f"{self.__name__}(id={self.id}, is_controller={self.is_controller}, " +
+        return (f"{self.name}(id={self.id}, is_controller={self.is_controller}, " +
                 f"is_autonomous={self.is_autonomous}, is_sensor={self.is_sensor}, is_accessible={self.is_accessible})")
 
 @total_ordering
@@ -79,10 +82,9 @@ class CommNetwork(object):
 
     def __init__(self, n_devices:int=20,
                  redundancy:int|LevelOfRedundancy=3, redundancy_deviation:int=2,
-                 network_type:str="metering",
+                 network_specs:dict={},
                  enable_sibling_to_sibling_comm:bool=False,
-                 n_entrypoints:int=3,
-                 controller_prob:float=0.3, sensor_prob:float=0.9):
+                 n_entrypoints:int=3):
         """
         The topology of the communication network is procedurally generated based on the
         parameters set here.
@@ -97,21 +99,16 @@ class CommNetwork(object):
             redundancy_deviation (int, optional):
                 Random variation in the redundancy, ignored if redundancy is NONE or FULL.
                 Defaults to 2.
-            network_type (str, optional):
-                Type of network to generate, must be one of ["metering", "SCADA"].
-                Defaults to "meter".
+            network_specs (str, optional):
+                Specifications of network. This is a JSON dictionary that provides details on
+                devices, aggregators and the root node.
+                Defaults to {}.
             enable_sibling_to_sibling_comm (bool, optional):
                 Whether to have lateral connections as well between nodes with the same parent.
                 Defaults to False.
             n_entrypoints (int, optional):
                 Number of entrypoints for attackers.
                 Defaults to 3.
-            controller_prob (float, optional):
-                Probability that a device is a controller.
-                Defaults to 0.3.
-            sensor_prob (float, optional):
-                Probability that a device is a sensor.
-                Defaults to 0.9.
         """
         self.n_devices = n_devices
 
@@ -125,14 +122,17 @@ class CommNetwork(object):
             self.redundancy = redundancy
             self.redundancy_deviation = redundancy_deviation
         
-        self.network_type = network_type
+        if len(network_specs) == 0:
+            with open(p.cwd() / "DefaultNetworkSpecifications.json") as f:
+                self.specs = json.load(f, cls=SpecDecoder)
+        else:
+            self.specs = network_specs
         self.enable_sibling_to_sibling_comm = enable_sibling_to_sibling_comm
         self.n_entrypoints = n_entrypoints
-        self.controller_prob = controller_prob
-        self.sensor_prob = sensor_prob
 
         # Generate Communication Network (Procedurally)
         self.n_components = 0
+        self.first_id, self.last_id = None, None
         self.root = self.build_network(components=[])
         self.entrypoints = []
         self.add_entrypoints()
@@ -147,17 +147,20 @@ class CommNetwork(object):
         """
         components = []
         for _ in range(self.n_devices):
-            is_sensor = np.random.choice([True, False], p=[self.sensor_prob, 1-self.sensor_prob])
-            is_controller = np.random.choice([True, False], p=[self.controller_prob, 1-self.controller_prob])
-            if not is_controller and not is_sensor:
-                is_sensor = True if self.sensor_prob >= self.controller_prob else False
-                is_controller = True if self.controller_prob > self.sensor_prob else False
-            device = Device(name="Device",
-                            is_controller=is_controller,
-                            is_sensor=is_sensor,
-                            is_accessible=False)
-            device.add_defence(CommmonDefences.easy_and_uncertain())
+            device_type = np.random.choice(self.specs["device"])
+            device_attrs =  CommNetwork.get_binary_attributes(device_type,
+                            ["is_sensor", "is_controller", "is_accessible", "is_autonomous"])
+            if not device_attrs["is_controller"] and not device_attrs["is_sensor"]:
+                device_attrs["is_sensor"] = True
+            device = Device(name=device_type.get("name", "Device"),
+                            is_controller=device_attrs["is_controller"],
+                            is_sensor=device_attrs["is_sensor"],
+                            is_autonomous=device_attrs["is_autonomous"],
+                            is_accessible=device_attrs["is_accessible"],)
+            CommNetwork.attach_cyber_characteristics(device, device_type)
             components.append(device)
+            if self.first_id is None:
+                self.first_id = device.id
         return components
     
     def build_aggregators(self, components:list[TreeNode]):
@@ -182,8 +185,11 @@ class CommNetwork(object):
             children_per_aggregator.append(n_children)
 
             # Create the aggregator
-            aggregator = Aggregator(name="Aggregator", is_accessible=False)
-            aggregator.add_defence(CommmonDefences.hard_and_uncertain())
+            aggregator_type = np.random.choice(self.specs["aggregator"])
+            aggregator_attrs =  CommNetwork.get_binary_attributes(aggregator_type, ["is_accessible"])
+            aggregator = Aggregator(name=aggregator_type.get("name", "Aggregator"),
+                                    is_accessible=aggregator_attrs["is_accessible"])
+            CommNetwork.attach_cyber_characteristics(aggregator, aggregator_type)
             aggregators.append(aggregator)
 
             for i, component in enumerate(components[sum_so_far:sum_so_far+n_children]):
@@ -205,9 +211,14 @@ class CommNetwork(object):
         Returns:
             TreeNode: Root of the communication network
         """
-        root = Aggregator(name="ControlCenter",
-                    is_accessible=False)
-        root.add_defence(CommmonDefences.very_hard_and_uncertain())
+        # Create the root node
+        root_type = self.specs["root"]
+        root_attrs =  CommNetwork.get_binary_attributes(root_type, ["is_accessible"])
+        root = Aggregator(name=root_type.get("name", "Control Center"),
+                          is_accessible=root_attrs["is_accessible"])
+        CommNetwork.attach_cyber_characteristics(root, root_type)
+        self.last_id = root.id
+        
         for i, component in enumerate(components):
             component.update_parents(root)
             CommNetwork.connect_by_edges(root, component)
@@ -244,10 +255,10 @@ class CommNetwork(object):
         Randomly add entry points to aggregators or devices in the network.
         Excludes control center / root.
         """
-        accessible_components = np.random.choice(np.arange(1, self.n_components),
+        accessible_components = np.random.choice(np.arange(self.first_id, self.last_id+1),
                                                  min(self.n_components - 1, self.n_entrypoints),
                                                  replace=False)
-        self.walk_and_set_entrypoints(self.root, idcs_to_match=accessible_components, idx=0)
+        self.walk_and_set_entrypoints(self.root, ids_to_match=accessible_components, idx=0)
     
     def build_graph(self, root:Aggregator, graph:nx.DiGraph):
         """
@@ -267,7 +278,7 @@ class CommNetwork(object):
             graph = self.build_graph(child, graph)
         return graph
     
-    def walk_and_set_entrypoints(self, root:Aggregator, idcs_to_match:np.ndarray, idx:int=0):
+    def walk_and_set_entrypoints(self, root:Aggregator, ids_to_match:np.ndarray):
         """
         Walk the tree, modifying indices that are present in the 'idcs_to_match' array.
 
@@ -281,13 +292,11 @@ class CommNetwork(object):
         Returns:
             int: Last visited index
         """
-        if idx in idcs_to_match:
+        if root.id in ids_to_match:
             root.is_accessible = True
             self.entrypoints.append(root)
         for child in root.children:
-            idx += 1
-            idx = self.walk_and_set_entrypoints(child, idcs_to_match, idx=idx)
-        return idx
+            self.walk_and_set_entrypoints(child, ids_to_match)
     
     def reset(self, active_node=None):
         """
@@ -299,7 +308,28 @@ class CommNetwork(object):
         active_node.reset()
         for child in active_node.children:
             self.reset(child)
-    
+
+    @staticmethod
+    def get_binary_attributes(configuration:dict, attributes:list[str], default:bool=False):
+        attrs = {}
+        for attr_name in attributes:
+            attr = configuration.get(attr_name, default)
+            attrs[attr_name] = attr if type(attr) is bool else bool(attr.rvs())
+        return attrs
+
+    @staticmethod
+    def attach_cyber_characteristics(component:CyberComponent, configuration:dict):
+        for defence in configuration.get("defences", []):
+            component.add_defence(
+                Defence(name=defence.get("name", "Defence"),
+                        success_distribution=defence["success"],
+                        effort_distribution=defence["effort"])
+            )
+        for vulnerability in configuration.get("vulnerabilities", []):
+            component.attach_vulnerability(
+                Vulnerability(name=vulnerability.get("name", "Vulnerability"))
+            )
+
     @staticmethod
     def connect_by_edges(source:Device|Aggregator, target:Device|Aggregator):
         """

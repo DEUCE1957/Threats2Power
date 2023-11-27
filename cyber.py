@@ -40,9 +40,9 @@ class Defence():
     attempts are more likely to succeed.
     """
 
-    def __init__(self, name:str, p:float=1.0,
+    def __init__(self, name:str, 
                  vulnerability:Vulnerability=Vulnerability("NoVulnerability"),
-                 success_distribution:distr.rv_discrete=distr.bernoulli,
+                 success_distribution:distr.rv_discrete=distr.bernoulli(p=1.0),
                  effort_distribution:distr.rv_continuous=distr.uniform(loc=0.0, scale=0.0)) -> None:
         """
         Cyber security defence is initialized with a set amount of time/effort needed
@@ -52,9 +52,6 @@ class Defence():
         Args:
             name (str):
                 Name of this defence
-            p (float, optional):
-                Probability of successful compromise, given infinite time.
-                Defaults to 1.0.
             success_distribution (scipy.stats.distributions.rv_discrete, optional):
                 Distribution of chance to break the defence, given infinite effort.
                 Defaults to Bernoulli.
@@ -65,7 +62,7 @@ class Defence():
         self.name = name
         self.vulnerability = vulnerability
         self.success_distr = success_distribution
-        self.p = p
+
         self.effort_distribution = effort_distribution
         self.effort_to_compromise = effort_distribution.rvs()
         self.is_compromised = False
@@ -121,7 +118,7 @@ class Defence():
         # Spent the exact amount of effort required to try and break the defence
         self.effort_spent = self.effort_to_compromise
         # If 'can_be_successful' is False then no amount of effort can break this defence
-        can_be_successful = self.success_distr(p=self.p).rvs()
+        can_be_successful = self.success_distr.rvs()
         if can_be_successful:
             self.is_compromised = True
         return can_be_successful, budget_used
@@ -146,36 +143,37 @@ class CommmonDefences():
     @classmethod
     def easy_and_certain(cls) -> Defence:
         """100% chance to succeed and will only take a little amount of effort to break."""
-        return Defence("EasyAndCertain", p=1.0,
-                effort_distribution=distr.expon(scale=1/1.0))
+        return Defence("EasyAndCertain", 
+                       success_distribution=distr.bernoulli(p=1.0),
+                       effort_distribution=distr.expon(scale=1/1.0))
     
     @classmethod
     def easy_and_uncertain(cls) -> Defence:
         """50% chance to succeed and will only take no effort to break."""
-        return Defence("EasyAndUncertain", p=0.5)
+        return Defence("EasyAndUncertain", success_distribution=distr.bernoulli(p=0.5))
 
     @classmethod
     def hard_and_certain(cls) -> Defence:
         """100% chance to succeed but will take a large amount of effort to break."""
-        return Defence("HardAndCertain", p=1.0,
+        return Defence("HardAndCertain", success_distribution=distr.bernoulli(p=1.0),
                  effort_distribution=distr.expon(scale=1/0.1))
 
     @classmethod
     def hard_and_uncertain(cls) -> Defence:
         """50% chance to succeed and will take a large amount of effort to break."""
-        return Defence("HardAndUncertain", p=0.5,
+        return Defence("HardAndUncertain", success_distribution=distr.bernoulli(p=0.5),
                 effort_distribution=distr.expon(scale=1/0.1))
 
     @classmethod
     def very_hard_and_uncertain(cls) -> Defence:
         """50% chance to succeed and will take a tremendous amount of effort to break."""
-        return Defence("VeryHardAndUncertain", p=0.5,
+        return Defence("VeryHardAndUncertain", success_distribution=distr.bernoulli(p=0.5),
                 effort_distribution=distr.expon(scale=1/0.01))
        
     @classmethod
     def impossible(cls) -> Defence:
         """0% chance to succeed and will take no effort to try and break."""
-        return Defence("Impossible", p=0)
+        return Defence("Impossible", success_distribution=distr.bernoulli(p=0.0))
 
 class CyberComponent():
 
