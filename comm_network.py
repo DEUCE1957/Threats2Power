@@ -147,7 +147,8 @@ class CommNetwork(object):
         """
         components = []
         for _ in range(self.n_devices):
-            device_type = np.random.choice(self.specs["device"])
+            device_type = np.random.choice(self.specs["device"]["types"],
+                                           p=self.specs["device"].get("commonness",None))
             device_attrs =  CommNetwork.get_binary_attributes(device_type,
                             ["is_sensor", "is_controller", "is_accessible", "is_autonomous"])
             if not device_attrs["is_controller"] and not device_attrs["is_sensor"]:
@@ -185,7 +186,8 @@ class CommNetwork(object):
             children_per_aggregator.append(n_children)
 
             # Create the aggregator
-            aggregator_type = np.random.choice(self.specs["aggregator"])
+            aggregator_type = np.random.choice(self.specs["aggregator"]["types"],
+                                               p=self.specs["aggregator"].get("commonness",None))
             aggregator_attrs =  CommNetwork.get_binary_attributes(aggregator_type, ["is_accessible"])
             aggregator = Aggregator(name=aggregator_type.get("name", "Aggregator"),
                                     is_accessible=aggregator_attrs["is_accessible"])
@@ -258,7 +260,7 @@ class CommNetwork(object):
         accessible_components = np.random.choice(np.arange(self.first_id, self.last_id+1),
                                                  min(self.n_components - 1, self.n_entrypoints),
                                                  replace=False)
-        self.walk_and_set_entrypoints(self.root, ids_to_match=accessible_components, idx=0)
+        self.walk_and_set_entrypoints(self.root, ids_to_match=accessible_components)
     
     def build_graph(self, root:Aggregator, graph:nx.DiGraph):
         """
