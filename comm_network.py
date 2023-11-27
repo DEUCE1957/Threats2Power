@@ -48,7 +48,7 @@ class Device(CyberComponent, TreeNode):
                 f"is_autonomous={self.is_autonomous}, is_sensor={self.is_sensor}, is_accessible={self.is_accessible})")
 
 @total_ordering
-class LevelOfRedundancy(Enum):
+class LevelOfChildren(Enum):
     """
     Level of Redundancy in a Network.
     NONE: No redundancy, single point of failure.
@@ -60,14 +60,14 @@ class LevelOfRedundancy(Enum):
     def __eq__(self, other:object) -> bool:
         if self.__class__ is other.__class__:
             return self.value == other.value
-        elif isinstance(self, LevelOfRedundancy):
+        elif isinstance(self, LevelOfChildren):
             return self.value == other
         raise NotImplementedError
     
     def __lt__(self, other:object) -> bool:
         if self.__class__ is other.__class__:
             return self.value < other.value
-        elif isinstance(self, LevelOfRedundancy):
+        elif isinstance(self, LevelOfChildren):
             return self.value < other
         raise NotImplementedError
 
@@ -81,8 +81,8 @@ class CommNetwork(object):
     """
 
     def __init__(self, n_devices:int=20,
-                 redundancy:int|LevelOfRedundancy=3, redundancy_deviation:int=2,
-                 network_specs:dict={},
+                 children_per_parent:int|LevelOfChildren=3, child_no_deviation:int=2,
+                 network_specs:p=p.cwd() / "DefaultNetworkSpecifications.json",
                  enable_sibling_to_sibling_comm:bool=False,
                  n_entrypoints:int=3):
         """
@@ -93,10 +93,10 @@ class CommNetwork(object):
             n_devices (int, optional):
                 Number of end-devices which collect data or execute commands.
                 Defaults to 20.
-            redundancy (int, optional):
+            children_per_parent (int, optional):
                 Level of redundancy in the network, i..e the no. of children per aggregator.
                 Defaults to 3.
-            redundancy_deviation (int, optional):
+            child_no_deviation (int, optional):
                 Random variation in the redundancy, ignored if redundancy is NONE or FULL.
                 Defaults to 2.
             network_specs (str, optional):
@@ -113,30 +113,29 @@ class CommNetwork(object):
         self.n_devices = n_devices
 
         # Redundancy (no. of children per aggregator)
-        self.redundancy_deviation = 0
-        if redundancy == LevelOfRedundancy.NONE:
-            self.redundancy = self.n_devices
-        elif redundancy == LevelOfRedundancy.FULL:
-            self.redundancy = LevelOfRedundancy.FULL.value
+        self.child_no_deviation = 0
+        if children_per_parent == LevelOfChildren.NONE:
+            self.children_per_parent = self.n_devices
+        elif children_per_parent == LevelOfChildren.FULL:
+            self.children_per_parent = LevelOfChildren.FULL.value
         else:
-            self.redundancy = redundancy
-            self.redundancy_deviation = redundancy_deviation
+            self.children_per_parent = children_per_parent
+            self.child_no_deviation = child_no_deviation
         
-        if len(network_specs) == 0:
-            with open(p.cwd() / "DefaultNetworkSpecifications.json") as f:
-                self.specs = json.load(f, cls=SpecDecoder)
-        else:
-            self.specs = network_specs
+        with open(network_specs, "r", encoding="utf-8") as f:
+            self.specs = json.load(f, cls=SpecDecoder)
         self.enable_sibling_to_sibling_comm = enable_sibling_to_sibling_comm
         self.n_entrypoints = n_entrypoints
 
         # Generate Communication Network (Procedurally)
         self.n_components = 0
-        self.first_id, self.last_id = None, None
+        self.node_ids = []
+        self.id_to_node = {} # Does not include root
         self.root = self.build_network(components=[])
         self.entrypoints = []
-        self.add_entrypoints()
+        self.set_entrypoints()
         self.graph = self.build_graph(self.root, nx.DiGraph())
+        
 
     def build_leaves(self):
         """
@@ -160,8 +159,8 @@ class CommNetwork(object):
                             is_accessible=device_attrs["is_accessible"],)
             CommNetwork.attach_cyber_characteristics(device, device_type)
             components.append(device)
-            if self.first_id is None:
-                self.first_id = device.id
+            self.node_ids.append(device.id)
+            self.id_to_node[device.id] = device
         return components
     
     def build_aggregators(self, components:list[TreeNode]):
@@ -180,8 +179,8 @@ class CommNetwork(object):
         # Allocate no. of children/components to each Aggregator
         children_per_aggregator = []
         while (sum_so_far := sum(children_per_aggregator)) != len(components):
-            deviation = np.random.randint(-self.redundancy_deviation, self.redundancy_deviation + 1)
-            at_least_1_child = max(1, (self.redundancy + deviation))
+            deviation = np.random.randint(-self.child_no_deviation, self.child_no_deviation + 1)
+            at_least_1_child = max(1, (self.children_per_parent + deviation))
             n_children = min(at_least_1_child, len(components) - sum_so_far)
             children_per_aggregator.append(n_children)
 
@@ -192,8 +191,8 @@ class CommNetwork(object):
             aggregator = Aggregator(name=aggregator_type.get("name", "Aggregator"),
                                     is_accessible=aggregator_attrs["is_accessible"])
             CommNetwork.attach_cyber_characteristics(aggregator, aggregator_type)
-            aggregators.append(aggregator)
-
+        
+            # Connects Edges
             for i, component in enumerate(components[sum_so_far:sum_so_far+n_children]):
                 component.update_parents(aggregator)
                 CommNetwork.connect_by_edges(aggregator, component)
@@ -201,6 +200,11 @@ class CommNetwork(object):
                 if i >= 1 and self.enable_sibling_to_sibling_comm:
                     prev_component = components[sum_so_far + (i-1)]
                     CommNetwork.connect_by_edges(prev_component, component)
+
+            # Keep Track of Nodes
+            aggregators.append(aggregator)
+            self.node_ids.append(aggregator.id)
+            self.id_to_node[aggregator.id] = aggregator
         return aggregators
     
     def build_root(self, components:list[TreeNode]):
@@ -219,7 +223,6 @@ class CommNetwork(object):
         root = Aggregator(name=root_type.get("name", "Control Center"),
                           is_accessible=root_attrs["is_accessible"])
         CommNetwork.attach_cyber_characteristics(root, root_type)
-        self.last_id = root.id
         
         for i, component in enumerate(components):
             component.update_parents(root)
@@ -243,7 +246,7 @@ class CommNetwork(object):
         if len(components) == 0:
             components = self.build_leaves()
             self.n_components += len(components)
-        elif len(components) > self.redundancy:
+        elif len(components) > self.children_per_parent:
             components = self.build_aggregators(components)
             self.n_components += len(components)
         else:
@@ -252,15 +255,24 @@ class CommNetwork(object):
             return root
         return self.build_network(components)
     
-    def add_entrypoints(self):
+    def set_entrypoints(self):
         """
-        Randomly add entry points to aggregators or devices in the network.
+        Randomly set entry points at devices or aggregators in the network.
         Excludes control center / root.
         """
-        accessible_components = np.random.choice(np.arange(self.first_id, self.last_id+1),
-                                                 min(self.n_components - 1, self.n_entrypoints),
-                                                 replace=False)
-        self.walk_and_set_entrypoints(self.root, ids_to_match=accessible_components)
+        # Reset any existing entrypoints
+        for entrypoint in self.entrypoints:
+            entrypoint.is_accessible = False
+        self.entrypoints = []
+        accessible_ids = np.random.choice(self.node_ids,
+                                              min(self.n_components - 1, self.n_entrypoints),
+                                              replace=False)
+        for accessible_id in accessible_ids:
+            component = self.id_to_node[accessible_id]
+            component.is_accessible = True
+            self.entrypoints.append(component)
+        
+        # self.walk_and_set_entrypoints(self.root, ids_to_match=accessible_components)
     
     def build_graph(self, root:Aggregator, graph:nx.DiGraph):
         """
@@ -300,7 +312,15 @@ class CommNetwork(object):
         for child in root.children:
             self.walk_and_set_entrypoints(child, ids_to_match)
     
-    def reset(self, active_node=None):
+    def reset(self):
+        """
+        Resets the network, including setting new entrypoint(s)
+        """
+        self.set_entrypoints()
+        self.reset_cyber_components(active_node=self.root)
+        self.graph = self.build_graph(self.root, graph=nx.DiGraph())
+
+    def reset_cyber_components(self, active_node=None):
         """
         Recursively reset the cyber security status of all components in
         the network, starts from the root node.
@@ -309,10 +329,23 @@ class CommNetwork(object):
             active_node = self.root
         active_node.reset()
         for child in active_node.children:
-            self.reset(child)
+            self.reset_cyber_components(active_node=child)
 
     @staticmethod
     def get_binary_attributes(configuration:dict, attributes:list[str], default:bool=False):
+        """
+        Retrieve named (binary/boolean) attributes from a configuration dictionary for a
+        specific component type.
+
+        Args:
+            configuration (dict): Describes the attributes of a component
+            attributes (list[str]): Names of attributes to try and retrieve
+            default (bool, optional): Default value to use if attribute cannot be found.
+                Defaults to False.
+
+        Returns:
+            dict[str:bool]: _description_
+        """
         attrs = {}
         for attr_name in attributes:
             attr = configuration.get(attr_name, default)
@@ -321,6 +354,15 @@ class CommNetwork(object):
 
     @staticmethod
     def attach_cyber_characteristics(component:CyberComponent, configuration:dict):
+        """
+        Add all Defences and Vulnerabilities specific in a component's configuration
+        dictionary to that component.
+
+        Args:
+            component (CyberComponent): A component in the communication network.
+            configuration (dict): Describes the characteristics of this type of
+                component.
+        """
         for defence in configuration.get("defences", []):
             component.add_defence(
                 Defence(name=defence.get("name", "Defence"),

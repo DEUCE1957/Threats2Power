@@ -29,6 +29,8 @@ class RandomAttacker(Attacker):
     Convergence is not gauranteed for large networks.
     """
 
+    __name__ = "RandomAttacker"
+
     @staticmethod
     def next_available_nodes(current_node:TreeNode):
         """

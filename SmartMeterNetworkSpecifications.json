@@ -12,7 +12,7 @@
    "is_controller": true,
    "is_autonomous": false,
    "defences": [{"name": "Defence",
-     "success": {"distribution": {"name": "bernoulli", "kwds": {"p": 0.5}}},
+     "success": {"distribution": {"name": "bernoulli", "kwds": {"p": 0.3}}},
      "effort": {"distribution": {"name": "expon",
        "kwds": {"loc": 0, "scale": 5}}}}],
    "vulnerabilities": []}],
