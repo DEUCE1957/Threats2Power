@@ -1,11 +1,9 @@
 import json
 import numpy as np
 import networkx as nx
-from enum import Enum
-from functools import total_ordering
 from pathlib import Path as p
 from tree import TreeNode, Link
-from cyber import CyberComponent, CommmonDefences, Defence, Vulnerability
+from cyber import CyberComponent, Defence, Vulnerability
 from network_specification import SpecDecoder
 
 class Aggregator(CyberComponent, TreeNode):
@@ -22,7 +20,6 @@ class Aggregator(CyberComponent, TreeNode):
         return f"{self.name}(id={self.id}, is_accessible={self.is_accessible})"
 
 class Device(CyberComponent, TreeNode):
-
     __name__ = "Device"
 
     def __init__(self, is_controller:bool, is_sensor:bool, is_autonomous:bool=False, *args, **kwargs) -> None:
@@ -47,42 +44,18 @@ class Device(CyberComponent, TreeNode):
         return (f"{self.name}(id={self.id}, is_controller={self.is_controller}, " +
                 f"is_autonomous={self.is_autonomous}, is_sensor={self.is_sensor}, is_accessible={self.is_accessible})")
 
-@total_ordering
-class LevelOfChildren(Enum):
-    """
-    Level of Redundancy in a Network.
-    NONE: No redundancy, single point of failure.
-    FULL: Maximize redundancy
-    """
-    NONE = -1
-    FULL = 2
-   
-    def __eq__(self, other:object) -> bool:
-        if self.__class__ is other.__class__:
-            return self.value == other.value
-        elif isinstance(self, LevelOfChildren):
-            return self.value == other
-        raise NotImplementedError
-    
-    def __lt__(self, other:object) -> bool:
-        if self.__class__ is other.__class__:
-            return self.value < other.value
-        elif isinstance(self, LevelOfChildren):
-            return self.value < other
-        raise NotImplementedError
-
 class CommNetwork(object):
-
     """
     Procedurally generated communication network composed of Devices and Aggregators.
     Each aggregator has a certain amount of children (can be devices, or other aggregators).
     Entry points are points in the network that can potentially be used by attackers to try
     and compromise the network, such as a Remote connection to a substation.
     """
+    __name__ == "CommNetwork"
 
     def __init__(self, n_devices:int=20,
-                 children_per_parent:int|LevelOfChildren=3, child_no_deviation:int=2,
-                 network_specs:p=p.cwd() / "DefaultNetworkSpecifications.json",
+                 children_per_parent:int=3, child_no_deviation:int=2,
+                 network_specs:p=p.cwd() / "specifications" / "Default_specifications.json",
                  enable_sibling_to_sibling_comm:bool=False,
                  n_entrypoints:int=3):
         """
@@ -113,14 +86,8 @@ class CommNetwork(object):
         self.n_devices = n_devices
 
         # Redundancy (no. of children per aggregator)
-        self.child_no_deviation = 0
-        if children_per_parent == LevelOfChildren.NONE:
-            self.children_per_parent = self.n_devices
-        elif children_per_parent == LevelOfChildren.FULL:
-            self.children_per_parent = LevelOfChildren.FULL.value
-        else:
-            self.children_per_parent = children_per_parent
-            self.child_no_deviation = child_no_deviation
+        self.children_per_parent = children_per_parent
+        self.child_no_deviation = child_no_deviation
         
         with open(network_specs, "r", encoding="utf-8") as f:
             self.specs = json.load(f, cls=SpecDecoder)
@@ -200,7 +167,7 @@ class CommNetwork(object):
             else: # Assign children to a new aggregator
                 # Create the aggregator
                 aggregator_type = np.random.choice(self.specs["aggregator"]["types"],
-                                                p=self.specs["aggregator"].get("commonness",None))
+                                                   p=self.specs["aggregator"].get("commonness",None))
                 aggregator_attrs =  CommNetwork.get_binary_attributes(aggregator_type, ["is_accessible"])
                 aggregator = Aggregator(name=aggregator_type.get("name", "Aggregator"),
                                         is_accessible=aggregator_attrs["is_accessible"])
