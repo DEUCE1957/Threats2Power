@@ -1,6 +1,7 @@
 import json
 import numpy as np
 import networkx as nx
+import pandapower
 from pathlib import Path as p
 from tree import TreeNode, Link
 from cyber import CyberComponent, Defence, Vulnerability
@@ -56,6 +57,7 @@ class CommNetwork(object):
     def __init__(self, n_devices:int=20,
                  children_per_parent:int=3, child_no_deviation:int=2,
                  network_specs:p=p.cwd() / "specifications" / "Default_specifications.json",
+                 grid:pandapower.pandapowerNet|None=None,
                  enable_sibling_to_sibling_comm:bool=False,
                  n_entrypoints:int=3):
         """
@@ -76,6 +78,9 @@ class CommNetwork(object):
                 Specifications of network. This is a JSON dictionary that provides details on
                 devices, aggregators and the root node.
                 Defaults to {}.
+            grid (pandapower.pandapowerNet | None, optional):
+                Specific pandapower grid to map communication network to. Will override 'n_devices'.
+                Defaults to None.
             enable_sibling_to_sibling_comm (bool, optional):
                 Whether to have lateral connections as well between nodes with the same parent.
                 Defaults to False.
@@ -91,6 +96,7 @@ class CommNetwork(object):
         
         with open(network_specs, "r", encoding="utf-8") as f:
             self.specs = json.load(f, cls=SpecDecoder)
+        self.grid = grid
         self.enable_sibling_to_sibling_comm = enable_sibling_to_sibling_comm
         self.n_entrypoints = n_entrypoints
 
@@ -103,7 +109,6 @@ class CommNetwork(object):
         self.set_entrypoints()
         self.graph = self.build_graph(self.root, nx.DiGraph())
         
-
     def build_leaves(self):
         """
         Construct the leaf nodes of the network. Leaf nodes have no children.
@@ -112,13 +117,39 @@ class CommNetwork(object):
             list[TreeNode]: Collection of leaf nodes
         """
         components = []
-        for _ in range(self.n_devices):
-            device_type = np.random.choice(self.specs["device"]["types"],
-                                           p=self.specs["device"].get("commonness",None))
+        device_types = self.specs["device"]["types"]
+        
+        if self.grid is None: 
+            # Device Type is based on statistic / expected proportion
+            device_type_prob = self.specs["device"].get("proportion",None)
+            device_map = enumerate(np.random.choice(device_types, p=device_type_prob,
+                                                    replace=True, size=self.n_devices))
+        else:
+            # Device Type is based on compatibility with power grid element in PandaPower
+            compatabilities = {}
+            for device_type in device_types:
+                compatible_devices = device_type.get("compatible")
+                for compatible_device in compatible_devices:
+                    if compatible_device not in compatabilities:
+                        compatabilities[compatible_device] = [device_type]
+                    else:
+                        compatabilities[compatible_device] = compatabilities[compatible_device] + [device_type]
+            no_of_devices = 0
+            device_map = {}
+            for attr, compatible_device_types in compatabilities.items():
+                attr_df = getattr(self.grid, attr)
+                no_of_attr_devices = attr_df.shape[0]
+                for i in range(no_of_devices, no_of_devices+no_of_attr_devices):
+                    # Assumes uniform probability of choosing any compatible device type
+                    # (ignores proportion option!)
+                    device_map[i] = np.random.choice(compatible_device_types)
+                no_of_devices += no_of_attr_devices
+            device_map = device_map.items()
+        
+        # Create Devices
+        for i, device_type in device_map:
             device_attrs =  CommNetwork.get_binary_attributes(device_type,
                             ["is_sensor", "is_controller", "is_accessible", "is_autonomous"])
-            if not device_attrs["is_controller"] and not device_attrs["is_sensor"]:
-                device_attrs["is_sensor"] = True
             device = Device(name=device_type.get("name", "Device"),
                             is_controller=device_attrs["is_controller"],
                             is_sensor=device_attrs["is_sensor"],
@@ -167,7 +198,7 @@ class CommNetwork(object):
             else: # Assign children to a new aggregator
                 # Create the aggregator
                 aggregator_type = np.random.choice(self.specs["aggregator"]["types"],
-                                                   p=self.specs["aggregator"].get("commonness",None))
+                                                   p=self.specs["aggregator"].get("proportion",None))
                 aggregator_attrs =  CommNetwork.get_binary_attributes(aggregator_type, ["is_accessible"])
                 aggregator = Aggregator(name=aggregator_type.get("name", "Aggregator"),
                                         is_accessible=aggregator_attrs["is_accessible"])
