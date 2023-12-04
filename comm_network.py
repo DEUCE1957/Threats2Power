@@ -118,10 +118,10 @@ class CommNetwork(object):
         """
         components = []
         device_types = self.specs["device"]["types"]
-        
+        # Proportion of devices of each type (default: uniform)
+        device_type_prob = self.specs["device"].get("proportion", [1/len(device_types)]*len(device_types))
         if self.grid is None: 
             # Device Type is based on statistic / expected proportion
-            device_type_prob = self.specs["device"].get("proportion",None)
             device_map = enumerate(np.random.choice(device_types, p=device_type_prob,
                                                     replace=True, size=self.n_devices))
         else:
@@ -134,15 +134,20 @@ class CommNetwork(object):
                         compatabilities[compatible_device] = [device_type]
                     else:
                         compatabilities[compatible_device] = compatabilities[compatible_device] + [device_type]
+
+            # Recalculate probabilities
+            probs = {device_type.get("name"): prob for device_type, prob in zip(device_types, device_type_prob)}
+            
             no_of_devices = 0
             device_map = {}
             for attr, compatible_device_types in compatabilities.items():
                 attr_df = getattr(self.grid, attr)
                 no_of_attr_devices = attr_df.shape[0]
                 for i in range(no_of_devices, no_of_devices+no_of_attr_devices):
-                    # Assumes uniform probability of choosing any compatible device type
-                    # (ignores proportion option!)
-                    device_map[i] = np.random.choice(compatible_device_types)
+                    # General proportion is retained
+                    local_probs = np.array([probs[device_type.get("name")] for device_type in compatible_device_types])
+                    local_probs = (1/sum(local_probs))*local_probs
+                    device_map[i] = np.random.choice(compatible_device_types, p=local_probs)
                 no_of_devices += no_of_attr_devices
             device_map = device_map.items()
         
