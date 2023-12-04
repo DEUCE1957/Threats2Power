@@ -135,7 +135,7 @@ class CommNetwork(object):
                     else:
                         compatabilities[compatible_device] = compatabilities[compatible_device] + [device_type]
 
-            # Recalculate probabilities
+            # Map device type (by name) to probability that device is of that type
             probs = {device_type.get("name"): prob for device_type, prob in zip(device_types, device_type_prob)}
             
             no_of_devices = 0
@@ -144,7 +144,8 @@ class CommNetwork(object):
                 attr_df = getattr(self.grid, attr)
                 no_of_attr_devices = attr_df.shape[0]
                 for i in range(no_of_devices, no_of_devices+no_of_attr_devices):
-                    # General proportion is retained
+                    # Recalculate probability of choosing each compatible device
+                    # Retains original proportion, probabilities must sum to 1
                     local_probs = np.array([probs[device_type.get("name")] for device_type in compatible_device_types])
                     local_probs = (1/sum(local_probs))*local_probs
                     device_map[i] = np.random.choice(compatible_device_types, p=local_probs)
