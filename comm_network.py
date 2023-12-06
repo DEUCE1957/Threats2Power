@@ -1,7 +1,10 @@
 import json
+import copy
+import math
 import numpy as np
 import networkx as nx
 import pandapower
+import grid2op
 from pathlib import Path as p
 from tree import TreeNode, Link
 from cyber import CyberComponent, Defence, Vulnerability
@@ -57,7 +60,7 @@ class CommNetwork(object):
     def __init__(self, n_devices:int=20,
                  children_per_parent:int=3, child_no_deviation:int=2,
                  network_specs:p=p.cwd() / "specifications" / "Default_specifications.json",
-                 grid:pandapower.pandapowerNet|None=None,
+                 grid:pandapower.pandapowerNet|grid2op.Environment.BaseEnv|None=None,
                  enable_sibling_to_sibling_comm:bool=False,
                  n_entrypoints:int=3):
         """
@@ -78,7 +81,7 @@ class CommNetwork(object):
                 Specifications of network. This is a JSON dictionary that provides details on
                 devices, aggregators and the root node.
                 Defaults to {}.
-            grid (pandapower.pandapowerNet | None, optional):
+            grid (pandapower.pandapowerNet | grid2op.Environment.BaseEnv | None, optional):
                 Specific pandapower grid to map communication network to. Will override 'n_devices'.
                 Defaults to None.
             enable_sibling_to_sibling_comm (bool, optional):
@@ -137,20 +140,47 @@ class CommNetwork(object):
 
             # Map device type (by name) to probability that device is of that type
             probs = {device_type.get("name"): prob for device_type, prob in zip(device_types, device_type_prob)}
-            
+
             no_of_devices = 0
             device_map = {}
-            for attr, compatible_device_types in compatabilities.items():
-                attr_df = getattr(self.grid, attr)
-                no_of_attr_devices = attr_df.shape[0]
-                for i in range(no_of_devices, no_of_devices+no_of_attr_devices):
-                    # Recalculate probability of choosing each compatible device
-                    # Retains original proportion, probabilities must sum to 1
-                    local_probs = np.array([probs[device_type.get("name")] for device_type in compatible_device_types])
-                    local_probs = (1/sum(local_probs))*local_probs
-                    device_map[i] = np.random.choice(compatible_device_types, p=local_probs)
-                no_of_devices += no_of_attr_devices
-            device_map = device_map.items()
+            if isinstance(self.grid, pandapower.pandapowerNet):
+                # Allocation per element (ignored conditions)
+                for attr, compatible_device_types in compatabilities.items():
+                    attr_df = getattr(self.grid, attr)
+                    no_of_attr_devices = attr_df.shape[0]
+                    for i in range(no_of_devices, no_of_devices+no_of_attr_devices):
+                        # Recalculate probability of choosing each compatible device
+                        # Retains original proportion, probabilities must sum to 1
+                        local_probs = np.array([probs[device_type.get("name")] for device_type in compatible_device_types])
+                        local_probs = (1/sum(local_probs))*local_probs
+                        device_map[i] = np.random.choice(compatible_device_types, p=local_probs)
+                    no_of_devices += no_of_attr_devices
+                device_map = device_map.items()
+            elif isinstance(self.grid, grid2op.Environment.BaseEnv):
+                # Allocation per substation (evaluates conditions)
+
+                # Grid2Op Obj name mapping
+                grid2op_naming = {"load": "loads_id", "gen":"generators_id", "line":"lines_or_id", "storage":"storages_id"}
+
+                for sub_no, sub_name in enumerate(self.grid.name_sub):
+                    connected_objs = self.grid.get_obj_connect_to(substation_id=sub_no)
+                    
+                    for attr, compatible_device_types in compatabilities.items():
+                        obj_ids = connected_objs[grid2op_naming[attr]]
+                        # Filter / Extend IDs depending on 'device_type' conditions
+                        obj_ids = CommNetwork.evaluate_conditions(device_type, self.grid.get_obs(), obj_ids)
+                        no_of_attr_devices =len(obj_ids)
+                        for i in range(no_of_devices, no_of_devices+no_of_attr_devices):
+                            # Recalculate probability of choosing each compatible device
+                            # Retains original proportion, probabilities must sum to 1
+                            local_probs = np.array([probs[device_type.get("name")] for device_type in compatible_device_types])
+                            local_probs = (1/sum(local_probs))*local_probs
+                            device_map[i] = np.random.choice(compatible_device_types, p=local_probs)
+                        no_of_devices += no_of_attr_devices
+                device_map = device_map.items()
+                pass
+            else:
+                raise NotImplemented(f"Grid of type ({type(self.grid)}) is not yet supported.")
         
         # Create Devices
         for i, device_type in device_map:
@@ -351,6 +381,36 @@ class CommNetwork(object):
         active_node.reset()
         for child in active_node.children:
             self.reset_cyber_components(active_node=child)
+    
+    @staticmethod
+    def evaluate_grid2op_conditions(device_type:dict, obs:grid2op.Observation, obj_ids):
+        """
+        Checks each object ID at a specific substation to see if it meets the conditions
+        given in the network's JSON specifications. 
+
+        Returns:
+            list: IDs that satisfy the condition.
+        """
+        conditions = device_type.get("conditions", None)
+        device_ids = copy.deepcopy(obj_ids)
+        if conditions is not None and len(obj_ids) > 0:
+            for condition in conditions:
+                # TODO: Check this works for multiple conditions
+                values = getattr(obs, condition["attribute"])[list(set(device_ids))]
+                match condition["action"]:
+                    case "filter":
+                        matching_ids = np.where((values >= condition.get("lb", -math.inf)) & \
+                                                (values < condition.get("ub", math.inf)))
+                        device_ids = device_ids[matching_ids]
+                    case "split":
+                        limit = condition.get("limit", math.inf)
+                        ids_to_split = device_ids[np.where(values > limit)]
+                        
+                        new_ids = [obj_id for obj_id in device_ids if obj_id not in ids_to_split]
+                        for i, id_to_split in enumerate(ids_to_split):
+                            new_ids.extend([id_to_split]*math.ceil(values[i] / limit))
+                        device_ids = new_ids
+        return device_ids
 
     @staticmethod
     def get_binary_attributes(configuration:dict, attributes:list[str], default:bool=False):
