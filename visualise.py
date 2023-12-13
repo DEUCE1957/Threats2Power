@@ -83,7 +83,7 @@ def hierarchy_pos(G:nx.DiGraph, root:TreeNode, width:float=1., vert_gap:float=0.
             
     return _hierarchy_pos(G, root, width, vert_gap, vert_loc, xcenter)
 
-def plot_communication_network(network:CommNetwork, palette:str="tab10"):
+def plot_communication_network(network:CommNetwork, palette:str="tab10", double:bool=False):
     """
     Plots a tree-like and spring layout of the given communication network.
     The visualization shows:
@@ -93,6 +93,10 @@ def plot_communication_network(network:CommNetwork, palette:str="tab10"):
 
     Args:
         network (CommNetwork): A specific communication network
+        palette (str, optional): Name of seaborn colour palette to use
+        double (bool, optional): Whether to plot the communication network in both hierarchical
+            and spring layout formats.
+            Defaults to False.
     """
     node_color_mask = np.full(network.graph.number_of_nodes(), fill_value="#1f78b4", dtype=object)
     node_edge_color_mask = np.full(network.graph.number_of_nodes(), fill_value="#000000", dtype=object)
@@ -128,29 +132,31 @@ def plot_communication_network(network:CommNetwork, palette:str="tab10"):
             edge_color_mask[j] = "#ff0000"
 
     # >> Plotting <<
-    fig, axes = plt.subplots(nrows=1, ncols=2,  figsize=(24,6), width_ratios=[0.6, 0.4])
+    fig, axes = plt.subplots(nrows=1, ncols=2 if double else 1, 
+                             figsize=(24 if double else 18,6), width_ratios=[0.6, 0.4] if double else [1.0])
     label_map = {node:node.id for node in network.graph.nodes()}
     labels, handles = zip(*sorted(zip(*(legend_map.keys(), legend_map.values())), key=lambda t: t[0]))
 
     # Hierarchical / Tree Visualization of Communication Network
     tree_pos = hierarchy_pos(nx.to_undirected(network.graph), network.root)
-    ax = axes[0]
+    ax = axes[0] if double else axes
     nx.draw_networkx_nodes(network.graph, pos=tree_pos, ax=ax,
                            node_size=400, node_shape="s", node_color=node_color_mask,
                            linewidths=1.0, edgecolors=node_edge_color_mask)
-    nx.draw_networkx_labels(network.graph, pos=tree_pos, labels=label_map, ax=axes[0], font_size=10)
-    nx.draw_networkx_edges(network.graph, pos=tree_pos, ax=axes[0], edge_color=edge_color_mask)
+    nx.draw_networkx_labels(network.graph, pos=tree_pos, labels=label_map, ax=ax, font_size=10)
+    nx.draw_networkx_edges(network.graph, pos=tree_pos, ax=ax, edge_color=edge_color_mask)
     
     
     # Spring Visualization of Communication Network
-    spring_pos = nx.layout.spring_layout(network.graph)
-    ax = axes[1]
-    nx.draw_networkx_nodes(network.graph, pos=spring_pos, ax=ax,
-                           node_size=400, node_shape="s", node_color=node_color_mask, 
-                           linewidths=1.0, edgecolors=node_edge_color_mask, )
-    nx.draw_networkx_labels(network.graph, pos=spring_pos, labels=label_map, ax=axes[1], font_size=10)
-    nx.draw_networkx_edges(network.graph, pos=spring_pos, ax=axes[1], edge_color=edge_color_mask)
-    # ax.legend(labels=labels, handles=handles)
+    if double:
+        spring_pos = nx.layout.spring_layout(network.graph)
+        ax = axes[1]
+        nx.draw_networkx_nodes(network.graph, pos=spring_pos, ax=ax,
+                            node_size=400, node_shape="s", node_color=node_color_mask, 
+                            linewidths=1.0, edgecolors=node_edge_color_mask, )
+        nx.draw_networkx_labels(network.graph, pos=spring_pos, labels=label_map, ax=ax, font_size=10)
+        nx.draw_networkx_edges(network.graph, pos=spring_pos, ax=ax, edge_color=edge_color_mask)
+    
     fig.legend(labels=labels, handles=handles, loc="lower center", bbox_to_anchor=(0.5, -0.1), ncol=len(labels),
                title="Legend", fancybox=True, fontsize='large', title_fontsize='larger')
     plt.tight_layout()
