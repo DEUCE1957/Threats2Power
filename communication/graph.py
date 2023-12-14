@@ -1,7 +1,6 @@
 import itertools
-from collections import OrderedDict
 
-class TreeNode():
+class CommNode():
 
     """
     Generic node in a hierarchical / tree-like graph.
@@ -149,14 +148,14 @@ class TreeNode():
     def __eq__(self, other):
         return self.name == other.name and self.id == other.id
 
-class Link():
+class CommEdge():
 
     """
     Generic directed Edge in a Graph, has a source Node and a Target node. Can also have
     attributes associated with it.
     """
 
-    def __init__(self, source:TreeNode, target:TreeNode) -> None:
+    def __init__(self, source:CommNode, target:CommNode) -> None:
         """
         Args:
             source (TreeNode, optional): The node where this edge starts. Defaults to None.
@@ -175,19 +174,3 @@ class Link():
             dict[str:obj]: NetworkX mapping for Edge representation
         """
         return dict(u_of_edge=self.source, v_of_edge=self.target, attr=self)
-
-class WiredLink(Link):
-
-    def __init__(self, *args) -> None:
-        """
-        Physical communication connection between 2 nodes, such as through fibre optic cables.
-        """
-        super().__init__(*args)
-
-class WirelessLink(Link):
-
-    def __init__(self, *args) -> None:
-        """
-        Wireless communication connection between 2 nodes, such as through radio waves.
-        """
-        super().__init__(*args)

@@ -5,7 +5,7 @@ Threats2Power provides a high-level, abstract, representation of the communicati
 Features include:
 
 * Procedural generation of communication network topologies
-* Association of communication network sensors / actuators with PandaPower and Grid2Op components
+* Association of communication network sensors / actuators with PandaPower or Grid2Op components
 * Static analysis of small communication networks
 * Monte Carlo analysis of any communication network
 * Event-like simulation of cyber attacks over a period of time

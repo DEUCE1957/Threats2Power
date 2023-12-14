@@ -6,11 +6,11 @@ import networkx as nx
 import pandapower
 import grid2op
 from pathlib import Path as p
-from tree import TreeNode, Link
-from cyber import CyberComponent, Defence, Vulnerability
-from network_specification import SpecDecoder
+from communication.graph import CommNode, CommEdge
+from cyber.components import CyberComponent, Defence, Vulnerability
+from procedural.specification import SpecDecoder
 
-class Aggregator(CyberComponent, TreeNode):
+class Aggregator(CyberComponent, CommNode):
     __name__ = "Aggregator"
 
     def __init__(self, *args, **kwargs) -> None:
@@ -23,7 +23,7 @@ class Aggregator(CyberComponent, TreeNode):
     def __str__(self):
         return f"{self.name}(id={self.id}, is_accessible={self.is_accessible})"
 
-class Device(CyberComponent, TreeNode):
+class Device(CyberComponent, CommNode):
     __name__ = "Device"
 
     def __init__(self, is_controller:bool, is_sensor:bool, is_autonomous:bool=False, *args, **kwargs) -> None:
@@ -197,7 +197,7 @@ class CommNetwork(object):
             self.id_to_node[device.id] = device
         return components
     
-    def build_aggregators(self, components:list[TreeNode]):
+    def build_aggregators(self, components:list[CommNode]):
         """
         Construct the aggregator nodes of the network. Each aggregator node oversees 1 or
         more components 1 level below it in the hierarchy. 
@@ -257,7 +257,7 @@ class CommNetwork(object):
         aggregators.extend(skipped_children)
         return aggregators
     
-    def build_root(self, components:list[TreeNode]):
+    def build_root(self, components:list[CommNode]):
         """
         Construct the root node of the network.
 
@@ -465,8 +465,8 @@ class CommNetwork(object):
             source (Device|Aggregator): Component to connect from
             target (Device|Aggregator): Component to connect to
         """
-        source.add_incoming_edge(target, Link(None, None))
-        target.add_outgoing_edge(source, Link(None, None))
+        source.add_incoming_edge(target, CommEdge(None, None))
+        target.add_outgoing_edge(source, CommEdge(None, None))
 
     @staticmethod
     def show_tree(root:Aggregator, s:str="", depth:int=0):

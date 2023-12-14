@@ -3,8 +3,8 @@ import matplotlib.pyplot as plt
 import seaborn as sns
 import colorsys
 import networkx as nx
-from tree import TreeNode
-from comm_network import CommNetwork
+from communication.graph import CommNode
+from communication.network import CommNetwork
 from matplotlib.patches import Patch
 from matplotlib import colors as mc
 
@@ -27,7 +27,7 @@ def lighten_color(color, amount=0.5):
     c = colorsys.rgb_to_hls(*mc.to_rgb(c))
     return colorsys.hls_to_rgb(c[0], 1 - amount * (1 - c[1]), c[2])
 
-def hierarchy_pos(G:nx.DiGraph, root:TreeNode, width:float=1., vert_gap:float=0.2, vert_loc:float=0, xcenter:float=0.5):
+def hierarchy_pos(G:nx.DiGraph, root:CommNode, width:float=1., vert_gap:float=0.2, vert_loc:float=0, xcenter:float=0.5):
 
     '''
     Credit: Joel (https://stackoverflow.com/a/29597209/2966723) 

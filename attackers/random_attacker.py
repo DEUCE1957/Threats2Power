@@ -1,24 +1,10 @@
-import numpy as np
-from tree import TreeNode
-from comm_network import CommNetwork
-from abc import abstractmethod
-from collections import deque
-
-class Attacker():
-    
-    def __init__(self, budget:float, verbose:bool=False):
-        """
-        Args:
-            budget (float): Time available to compromise nodes, starting at the entry point.
-            verbose (bool, optional): Whether to print out attack steps.
-                Defaults to False
-        """
-        self.budget = budget
-        self.verbose = verbose
-    
-    @abstractmethod
-    def attack_network(self, comm_network:CommNetwork) -> None:
-        pass
+import sys
+from pathlib import Path
+sys.path.append(str(Path(__file__).parent))
+from interface import Attacker
+sys.path.append(str(Path(__file__).parent.parent))
+from communication.graph import CommNode
+from communication.network import CommNetwork
 
 class RandomAttacker(Attacker):
 
@@ -32,7 +18,7 @@ class RandomAttacker(Attacker):
     __name__ = "RandomAttacker"
 
     @staticmethod
-    def next_available_nodes(current_node:TreeNode):
+    def next_available_nodes(current_node:CommNode):
         """
         Finds all direct neighbours of this node that we can 
         reach through an outgoing connection / edge.
@@ -55,7 +41,7 @@ class RandomAttacker(Attacker):
         return available_nodes
     
     @staticmethod
-    def compromise_children(current_node:TreeNode, nodes_compromised):
+    def compromise_children(current_node:CommNode, nodes_compromised):
         """Recursively compromise all children of the current node"""
         for child in current_node.children:
             child.compromise()
@@ -65,10 +51,10 @@ class RandomAttacker(Attacker):
             )
         return nodes_compromised
 
-    def random_walk_with_budget(self, current_node:TreeNode, time_available:float,
-                                nodes_available:set[TreeNode]=set(),
-                                nodes_visited:set[TreeNode]=set(),
-                                nodes_compromised:set[TreeNode]=set(),
+    def random_walk_with_budget(self, current_node:CommNode, time_available:float,
+                                nodes_available:set[CommNode]=set(),
+                                nodes_visited:set[CommNode]=set(),
+                                nodes_compromised:set[CommNode]=set(),
                                 max_can_compromise:int=1):
         """
         Recursively walk a graph, trying to any compromise components / nodes we come across.
