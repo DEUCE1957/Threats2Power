@@ -6,47 +6,11 @@ import networkx as nx
 import pandapower
 import grid2op
 from pathlib import Path as p
+from cyber.assets import CyberDevice, Defence, Vulnerability
 from communication.graph import CommNode, CommEdge
-from cyber.components import CyberComponent, Defence, Vulnerability
+from communication.components import Device, Aggregator
 from procedural.specification import SpecDecoder
 
-class Aggregator(CyberComponent, CommNode):
-    __name__ = "Aggregator"
-
-    def __init__(self, *args, **kwargs) -> None:
-        """
-        Generic communication network component that aggregates data from 1 or more sources.
-        The Aggregator can be hacked, which can also impact the reliability of all downstream data. 
-        """
-        super().__init__(*args, **kwargs)
-
-    def __str__(self):
-        return f"{self.name}(id={self.id}, is_accessible={self.is_accessible})"
-
-class Device(CyberComponent, CommNode):
-    __name__ = "Device"
-
-    def __init__(self, is_controller:bool, is_sensor:bool, is_autonomous:bool=False, *args, **kwargs) -> None:
-        """
-        Generic communication network component that collects data and/or acts in the real world.
-        The device can be hacked, which impacts the trustworthiness of the data the device emits.
-
-        Args:
-            is_controller (bool): Whether the device controls a real-world object,
-                such as the power output of battery
-            is_sensor (bool): Whether the device collects data about a real-world object,
-                such as the state of charge of a battery
-            is_autonomous (bool): Whether the device can independently make decisions
-                such as when to charge the battery. Always false is device is not a controller.
-        """
-        super().__init__(*args, **kwargs)
-        self.is_controller = is_controller
-        self.is_autonomous = False if not self.is_controller else is_autonomous
-        self.is_sensor = is_sensor
-
-    def __str__(self):
-        return (f"{self.name}(id={self.id}, is_controller={self.is_controller}, " +
-                f"is_autonomous={self.is_autonomous}, is_sensor={self.is_sensor}, is_accessible={self.is_accessible})")
 
 class CommNetwork(object):
     """
@@ -195,6 +159,7 @@ class CommNetwork(object):
             components.append(device)
             self.node_ids.append(device.id)
             self.id_to_node[device.id] = device
+            self.n_components += 1
         return components
     
     def build_aggregators(self, components:list[CommNode]):
@@ -254,6 +219,7 @@ class CommNetwork(object):
                 aggregators.append(aggregator)
                 self.node_ids.append(aggregator.id)
                 self.id_to_node[aggregator.id] = aggregator
+                self.n_components += 1
         aggregators.extend(skipped_children)
         return aggregators
     
@@ -282,6 +248,7 @@ class CommNetwork(object):
                 prev_component = components[i - 1]
                 if prev_component.__class__ == component.__class__:
                     CommNetwork.connect_by_edges(prev_component, component)
+        self.n_components += 1
         return root
         
     def build_network(self, components:list[Device|Aggregator]):
@@ -296,13 +263,10 @@ class CommNetwork(object):
         """
         if len(components) == 0:
             components = self.build_leaves()
-            self.n_components += len(components)
         elif len(components) > 1:
             components = self.build_aggregators(components)
-            self.n_components += len(components)
         else:
             root = self.build_root(components)
-            self.n_components += 1
             return root
         return self.build_network(components)
     
@@ -336,9 +300,9 @@ class CommNetwork(object):
         """
         graph.add_node(root)
         for edge in root.outgoing_edges:
-            graph.add_edge(edge.source, edge.target)
+            graph.add_edge(edge.source, edge.target, p=edge.target.get_prob_to_compromise())
         for edge in root.incoming_edges:
-            graph.add_edge(edge.target, edge.source)
+            graph.add_edge(edge.target, edge.source, p=edge.source.get_prob_to_compromise())
         for child in root.children:
             graph = self.build_graph(child, graph)
         return graph
@@ -434,7 +398,7 @@ class CommNetwork(object):
         return attrs
 
     @staticmethod
-    def attach_cyber_characteristics(component:CyberComponent, configuration:dict):
+    def attach_cyber_characteristics(component:CyberDevice, configuration:dict):
         """
         Add all Defences and Vulnerabilities specific in a component's configuration
         dictionary to that component.

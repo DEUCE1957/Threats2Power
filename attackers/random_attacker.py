@@ -1,8 +1,4 @@
-import sys
-from pathlib import Path
-sys.path.append(str(Path(__file__).parent))
-from interface import Attacker
-sys.path.append(str(Path(__file__).parent.parent))
+from attackers.interface import Attacker
 from communication.graph import CommNode
 from communication.network import CommNetwork
 

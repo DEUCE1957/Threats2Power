@@ -62,6 +62,7 @@ class Defence():
         self.name = name
         self.vulnerability = vulnerability
         self.success_distr = success_distribution
+        self.success_kwargs = self.success_distr.__dict__["kwds"]
 
         self.effort_distribution = effort_distribution
         self.effort_to_compromise = effort_distribution.rvs()
@@ -80,12 +81,14 @@ class Defence():
         # If vulnerability has already been used, no benefit from using it again
         if self.vulnerability.exploited:
             self.effort_to_compromise -= 0
-            self.p += 0
+            self.success_kwargs["p"] += 0
         else:
             success_rate_improvement, effort_removed = self.vulnerability.exploit()
-            self.p = min(1, self.p + success_rate_improvement)
+            self.success_kwargs["p"] = min(1, self.success_kwargs["p"] + success_rate_improvement)
             self.effort_to_compromise = max(0, self.effort_to_compromise - effort_removed)
-        
+        # Reset Success Distribution with new probability
+        self.success_distr = self.success_distr.__dict__["dist"](**self.success_kwargs)
+    
     def is_worth_attacking(self) -> bool:
         """Whether this Defence is still worth attacking"""
         if isclose(self.effort_spent, self.effort_to_compromise) or self.is_compromised:
@@ -175,17 +178,17 @@ class CommmonDefences():
         """0% chance to succeed and will take no effort to try and break."""
         return Defence("Impossible", success_distribution=distr.bernoulli(p=0.0))
 
-class CyberComponent():
+class CyberDevice():
 
     """
-    A Cyber Component is any electronic device that can be hacked. In order to
+    A Cyber Device is any electronic device that can be hacked. In order to
     attempt to hack it must be next to an open or already compromised connection.
     The time taken to compromise the component depends on its defences and vulnerabilities.
     """
 
     def __init__(self, is_accessible:bool, *args, is_compromised:bool=False, **kwargs) -> None:
         """
-        A Cyber Component can be accessible (directly open to attack) and/or be
+        A Cyber Device can be accessible (directly open to attack) and/or be
         compromised by an attack.
         Inaccessible cyber components can potentially still be attacked
         from neighboring components.
@@ -204,7 +207,7 @@ class CyberComponent():
     
     def attack(self, budget:float) -> (bool, float):
         """
-        Attack this component with a certain time budget available. Note that time is not an exact measure.
+        Attack this device with a certain time budget available. Note that time is not an exact measure.
         To successfuly compromise the device, all defences must be broken.
 
         Args:
@@ -241,12 +244,12 @@ class CyberComponent():
         """
         p = 1.0
         for defence in self.defences.values():
-            p *= defence.p
+            p *= defence.success_kwargs.get("p", 1.0)
         return p
     
     def compromise(self):
         """
-        Compromise this Cyber component, including all of its defences, regardless of
+        Compromise this Cyber Device, including all of its defences, regardless of
         the success probability or effort required.
         This is automatically invoked when a parent node is compromised.
         """
