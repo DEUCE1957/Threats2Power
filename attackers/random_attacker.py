@@ -1,3 +1,4 @@
+import numpy as np
 from attackers.interface import Attacker
 from communication.graph import CommNode
 from communication.network import CommNetwork

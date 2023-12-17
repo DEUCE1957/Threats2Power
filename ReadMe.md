@@ -7,14 +7,17 @@ Features include:
 * Procedural generation of communication network topologies
 * Association of communication network sensors / actuators with PandaPower or Grid2Op components
 * Cyber-attack simulation based on threat modelling
+    * Static analysis of small communication networks
+    * Monte Carlo analysis of any communication network
+    * (Planned) Event-like / dynamic simulation of cyber-attacks over a period of time 
 * Specifications for different communication network:
     * Supervisory Control and Data Acquisition (SCADA)
     * Protection
     * Wide Area Monitoring Systems (WAMS)
     * Smart Meters
-* Static analysis of small communication networks
-* Monte Carlo analysis of any communication network
-* Event-like simulation of cyber attacks over a period of time
+* Grade cyber-attack based on criticality of affected components
+    * Scheme 1: Cost of failure of component
+    * Scheme 2: Connectivity of node in power system graph
 * Visualization of the communication network topology, including which components have been compromised
 
 ## Module Layout

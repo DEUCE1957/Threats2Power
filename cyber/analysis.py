@@ -1,7 +1,12 @@
 import copy
+import numpy as np
 from fractions import Fraction
 import multiprocess as mp
+from tqdm import tqdm
+from communication.components import Device
 from communication.network import CommNetwork
+from attackers.interface import Attacker
+from attackers.random_attacker import RandomAttacker
 # TODO: Account for probability of 0 devices being compromised
 
 def iterate_over_paths(path, prob, reachable_nodes={}, visited_nodes={}, id_to_node={}):
@@ -55,7 +60,7 @@ def static_analysis(network:CommNetwork, verbose:bool=True, show_paths:bool=Fals
     """
     sum_probs = 0.0
     n_probs = {}
-    for path_no, (path, prob, ends_on_failure) in enumerate(get_all_paths(network.graph)):
+    for path_no, (path, prob, ends_on_failure) in tqdm(enumerate(get_all_paths(network.graph)), desc="Path ", leave=False):
         if show_paths:
             print(f"Path {path_no} :: Prob {str(Fraction(prob).limit_denominator()):<15}" + 
                     f" :: {'-'.join([str(node) for node in path])} :: {ends_on_failure}")
@@ -68,3 +73,15 @@ def static_analysis(network:CommNetwork, verbose:bool=True, show_paths:bool=Fals
     if verbose:
         print("\n".join(f"{k} devices: {v}" for k,v in sorted(n_probs.items(),key=lambda item: item[0])))
     return n_probs
+
+def monte_carlo_analysis(network:CommNetwork, n_attacks:int, budget:float, attacker_variant:Attacker=RandomAttacker, device_only:bool=True):
+    compromised_array = np.zeros(shape=n_attacks, dtype=np.int16)
+    effort_array = np.zeros(shape=n_attacks, dtype=np.float32)
+    for attack_no in tqdm(range(n_attacks), desc="Attack "):
+        attacker = attacker_variant(budget=budget, verbose=False)
+        nodes_compromised, total_effort_spent = attacker.attack_network(network)
+        compromised_array[attack_no] = len([n for n in nodes_compromised if \
+                                            (isinstance(n, Device) if device_only else True)])
+        effort_array[attack_no] = total_effort_spent
+        network.reset()
+    return compromised_array, effort_array
