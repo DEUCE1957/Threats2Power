@@ -2,6 +2,7 @@ import json
 import copy
 import math
 import numpy as np
+import pandas as pd
 import networkx as nx
 import pandapower
 import grid2op
@@ -76,7 +77,7 @@ class CommNetwork(object):
         self.set_entrypoints()
         self.graph = self.build_graph(self.root, nx.DiGraph())
         
-    def build_leaves(self):
+    def build_leaves(self, prop:np.ndarray=None):
         """
         Construct the leaf nodes of the network. Leaf nodes have no children.
 
@@ -84,82 +85,93 @@ class CommNetwork(object):
             list[TreeNode]: Collection of leaf nodes
         """
         components = []
-        device_types = self.specs["device"]["types"]
+
+        cat_spec = self.specs["device"]["categories"]
+        cat_lookup = {cat["name"]:cat for cat in cat_spec}
+        categories = list(cat_lookup.keys())
+
         # Proportion of devices of each type (default: uniform)
-        device_type_prob = self.specs["device"].get("proportion", [1/len(device_types)]*len(device_types))
+        uniform_device_types = [1/len(categories)]*len(categories)
+        device_type_prob = self.specs["device"].get("proportion", uniform_device_types) if prop is None else prop
+        # Device Type is based on statistic / expected proportion
         if self.grid is None: 
-            # Device Type is based on statistic / expected proportion
-            device_map = enumerate(np.random.choice(device_types, p=device_type_prob,
-                                                    replace=True, size=self.n_devices))
-        else:
-            # Device Type is based on compatibility with power grid element in PandaPower
-            compatabilities = {}
-            for device_type in device_types:
-                compatible_devices = device_type.get("compatible")
-                for compatible_device in compatible_devices:
-                    if compatible_device not in compatabilities:
-                        compatabilities[compatible_device] = [device_type]
+            device_population = np.random.choice(categories, p=device_type_prob, replace=True, size=self.n_devices)
+            device_map = [(i, cat_name, 1) for i, cat_name in enumerate(device_population)]
+        # Apply rules in Specifications to assign 1 or more devices to equipment in the grid.
+        else: 
+            # Map device category (by name) to probability that device is of that category
+            prob_lookup = {cat_name: prob for cat_name, prob in zip(categories, device_type_prob)}
+
+            compat = {}
+            for i, cat_name in enumerate(categories):
+                cat = cat_lookup[cat_name]
+                comp_devices = cat.get("compatible")
+                for comp_device, conditions in comp_devices.items():
+                    equip_df = getattr(self.grid, comp_device)
+
+                    # DataFrame with probability of choosing each Device Category (e.g. different types of smart meters)
+                    if comp_device not in compat:
+                        compat[comp_device] = dict(
+                            probs=pd.DataFrame(np.zeros((equip_df.shape[0], len(categories))), columns=categories),
+                            splits=pd.DataFrame(np.ones((equip_df.shape[0], len(categories))), columns=categories, dtype=np.int16),
+                        )
+                    # Find Equipment that meets Conditions
+                    if "filter" in conditions:
+                        condition = conditions["filter"]
+                        criteria = equip_df.get(condition["attribute"])
+                        mask = (criteria >= condition.get("lb", -math.inf)) & \
+                            (criteria <= condition.get("ub",  math.inf))
+                        compat[comp_device]["probs"].iloc[mask, i] = prob_lookup[cat_name]
                     else:
-                        compatabilities[compatible_device] = compatabilities[compatible_device] + [device_type]
+                        compat[comp_device]["probs"].iloc[:, i] = prob_lookup[cat_name]
 
-            # Map device type (by name) to probability that device is of that type
-            probs = {device_type.get("name"): prob for device_type, prob in zip(device_types, device_type_prob)}
-
-            no_of_devices = 0
-            device_map = {}
-            if isinstance(self.grid, pandapower.pandapowerNet):
-                # Allocation per element (ignored conditions)
-                for attr, compatible_device_types in compatabilities.items():
-                    attr_df = getattr(self.grid, attr)
-                    no_of_attr_devices = attr_df.shape[0]
-                    for i in range(no_of_devices, no_of_devices+no_of_attr_devices):
-                        # Recalculate probability of choosing each compatible device
-                        # Retains original proportion, probabilities must sum to 1
-                        local_probs = np.array([probs[device_type.get("name")] for device_type in compatible_device_types])
-                        local_probs = (1/sum(local_probs))*local_probs
-                        device_map[i] = np.random.choice(compatible_device_types, p=local_probs)
-                    no_of_devices += no_of_attr_devices
-                device_map = device_map.items()
-            elif isinstance(self.grid, grid2op.Environment.BaseEnv):
-                # Allocation per substation (evaluates conditions)
-
-                # Grid2Op Obj name mapping
-                grid2op_naming = {"load": "loads_id", "gen":"generators_id", "line":"lines_or_id", "storage":"storages_id"}
-
-                for sub_no, sub_name in enumerate(self.grid.name_sub):
-                    connected_objs = self.grid.get_obj_connect_to(substation_id=sub_no)
+                    if "split" in conditions:
+                        condition = conditions["split"]
+                        criteria = equip_df.get(condition["attribute"])
+                        min_splits = criteria.floordiv(condition.get("limit", math.inf)).astype(np.int16)
+                        leftover_split = (criteria.mod(condition.get("limit", math.inf)) > 0).astype(np.int16)
+                        compat[comp_device]["splits"].iloc[:, i] = min_splits + leftover_split
                     
-                    for attr, compatible_device_types in compatabilities.items():
-                        obj_ids = connected_objs[grid2op_naming[attr]]
-                        # Filter / Extend IDs depending on 'device_type' conditions
-                        obj_ids = CommNetwork.evaluate_conditions(device_type, self.grid.get_obs(), obj_ids)
-                        no_of_attr_devices =len(obj_ids)
-                        for i in range(no_of_devices, no_of_devices+no_of_attr_devices):
-                            # Recalculate probability of choosing each compatible device
-                            # Retains original proportion, probabilities must sum to 1
-                            local_probs = np.array([probs[device_type.get("name")] for device_type in compatible_device_types])
-                            local_probs = (1/sum(local_probs))*local_probs
-                            device_map[i] = np.random.choice(compatible_device_types, p=local_probs)
-                        no_of_devices += no_of_attr_devices
-                device_map = device_map.items()
-                pass
-            else:
-                raise NotImplemented(f"Grid of type ({type(self.grid)}) is not yet supported.")
-        
+            select_compatible_device_category = lambda p: np.random.choice(categories, p=p)
+            
+            no_of_devices = 0
+            device_map = []
+            for comp_device in compat.keys():
+                equip_df = getattr(self.grid, comp_device)
+
+                # Normalize probabilities (must sum to 1)
+                probs = compat[comp_device]["probs"]
+                probs = probs.div(probs.sum(axis=1), axis=0).dropna()
+
+                # Select device category
+                equip_df["Category"] = probs.apply(select_compatible_device_category, axis=1)
+                equip_df.dropna(subset=["Category"], inplace=True)
+
+                # Split device if equipment exceeds size limit
+                select_no_of_splits = lambda row: row[equip_df.Category.loc[row.name].item()]
+                equip_df["Splits"] = compat[comp_device]["splits"].apply(select_no_of_splits, axis=1)
+                
+                device_map.extend([(no_of_devices + i, equip_df.iloc[i, -2], equip_df.iloc[i, -1]) for i in range(equip_df.shape[0])])
+                no_of_devices = len(device_map)
+
+
         # Create Devices
-        for i, device_type in device_map:
-            device_attrs =  CommNetwork.get_binary_attributes(device_type,
+        for i, cat_name, n_splits in device_map:
+            cat = cat_lookup[cat_name]
+            device_name = cat.get("name", "Device")
+            device_attrs =  CommNetwork.get_binary_attributes(cat,
                             ["is_sensor", "is_controller", "is_accessible", "is_autonomous"])
-            device = Device(name=device_type.get("name", "Device"),
-                            is_controller=device_attrs["is_controller"],
-                            is_sensor=device_attrs["is_sensor"],
-                            is_autonomous=device_attrs["is_autonomous"],
-                            is_accessible=device_attrs["is_accessible"],)
-            CommNetwork.attach_cyber_characteristics(device, device_type)
-            components.append(device)
-            self.node_ids.append(device.id)
-            self.id_to_node[device.id] = device
-            self.n_components += 1
+            for j in range(n_splits):
+                device = Device(name=device_name,
+                                is_controller=device_attrs["is_controller"],
+                                is_sensor=device_attrs["is_sensor"],
+                                is_autonomous=device_attrs["is_autonomous"],
+                                is_accessible=device_attrs["is_accessible"],)
+                CommNetwork.attach_cyber_characteristics(device, cat)
+                components.append(device)
+                self.node_ids.append(device.id)
+                self.id_to_node[device.id] = device
+                self.n_components += 1
         return components
     
     def build_aggregators(self, components:list[CommNode]):
@@ -187,7 +199,9 @@ class CommNetwork(object):
             # No. of children per aggregator (can be negative)
             n_children = self.children_per_parent + random_deviation
             
-            if n_children < 0: # Negative cannot exceed remaining no. of components
+            if self.specs["topology"] == "flat": # Flat Communication Network
+                n_children = len(components)
+            elif n_children < 0: # Negative cannot exceed remaining no. of components
                 n_children = max(n_children, sum_so_far - len(components))
             else: # Positive must at least be 1, up to the maximum no. of remaining components
                 n_children = max(1, min(n_children, len(components) - sum_so_far))
@@ -198,12 +212,12 @@ class CommNetwork(object):
                                         np.abs(n_children) > 1 else [components[sum_so_far]])
             else: # Assign children to a new aggregator
                 # Create the aggregator
-                aggregator_type = np.random.choice(self.specs["aggregator"]["types"],
-                                                   p=self.specs["aggregator"].get("proportion",None))
-                aggregator_attrs =  CommNetwork.get_binary_attributes(aggregator_type, ["is_accessible"])
-                aggregator = Aggregator(name=aggregator_type.get("name", "Aggregator"),
+                aggregator_category = np.random.choice(self.specs["aggregator"]["categories"],
+                                                       p=self.specs["aggregator"].get("proportion",None))
+                aggregator_attrs =  CommNetwork.get_binary_attributes(aggregator_category, ["is_accessible"])
+                aggregator = Aggregator(name=aggregator_category.get("name", "Aggregator"),
                                         is_accessible=aggregator_attrs["is_accessible"])
-                CommNetwork.attach_cyber_characteristics(aggregator, aggregator_type)
+                CommNetwork.attach_cyber_characteristics(aggregator, aggregator_category)
             
                 # Connects Edges
                 for i, component in enumerate(components[sum_so_far:sum_so_far+n_children]):
