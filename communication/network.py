@@ -6,10 +6,11 @@ import pandas as pd
 import networkx as nx
 import pandapower
 import grid2op
+from collections import defaultdict
 from pathlib import Path as p
 from cyber.assets import CyberDevice, Defence, Vulnerability
 from communication.graph import CommNode, CommEdge
-from communication.components import Device, Aggregator
+from communication.components import Equipment, Device, Aggregator
 from procedural.specification import SpecDecoder
 
 
@@ -71,6 +72,7 @@ class CommNetwork(object):
         # Generate Communication Network (Procedurally)
         self.n_components = 0
         self.node_ids = []
+        self.equip_to_device = defaultdict(list)
         self.id_to_node = {} # Does not include root
         self.root = self.build_network(components=[])
         self.entrypoints = []
@@ -96,7 +98,7 @@ class CommNetwork(object):
         # Device Type is based on statistic / expected proportion
         if self.grid is None: 
             device_population = np.random.choice(categories, p=device_type_prob, replace=True, size=self.n_devices)
-            device_map = [(i, cat_name, 1) for i, cat_name in enumerate(device_population)]
+            device_map = [(i, cat_name, 1, None) for i, cat_name in enumerate(device_population)]
         # Apply rules in Specifications to assign 1 or more devices to equipment in the grid.
         else: 
             # Map device category (by name) to probability that device is of that category
@@ -136,6 +138,7 @@ class CommNetwork(object):
             
             no_of_devices = 0
             device_map = []
+            equipment_set = {}
             for comp_device in compat.keys():
                 equip_df = getattr(self.grid, comp_device)
 
@@ -150,19 +153,20 @@ class CommNetwork(object):
                 # Split device if equipment exceeds size limit
                 select_no_of_splits = lambda row: row[equip_df.Category.loc[row.name].item()]
                 equip_df["Splits"] = compat[comp_device]["splits"].apply(select_no_of_splits, axis=1)
-                
-                device_map.extend([(no_of_devices + i, equip_df.iloc[i, -2], equip_df.iloc[i, -1]) for i in range(equip_df.shape[0])])
+
+                device_map.extend([(no_of_devices + i, equip_df.iloc[i, -2], equip_df.iloc[i, -1],
+                                    Equipment(idx, kind=comp_device)) for idx in equip_df.index])
                 no_of_devices = len(device_map)
 
-
         # Create Devices
-        for i, cat_name, n_splits in device_map:
+        for i, cat_name, n_splits, equip in device_map:
             cat = cat_lookup[cat_name]
             device_name = cat.get("name", "Device")
             device_attrs =  CommNetwork.get_binary_attributes(cat,
                             ["is_sensor", "is_controller", "is_accessible", "is_autonomous"])
-            for j in range(n_splits):
+            for _ in range(n_splits):
                 device = Device(name=device_name,
+                                equipment=equip,
                                 is_controller=device_attrs["is_controller"],
                                 is_sensor=device_attrs["is_sensor"],
                                 is_autonomous=device_attrs["is_autonomous"],
@@ -170,6 +174,7 @@ class CommNetwork(object):
                 CommNetwork.attach_cyber_characteristics(device, cat)
                 components.append(device)
                 self.node_ids.append(device.id)
+                self.equip_to_device[equip].append(device.id)
                 self.id_to_node[device.id] = device
                 self.n_components += 1
         return components
