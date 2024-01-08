@@ -5,7 +5,6 @@ import numpy as np
 import pandas as pd
 import networkx as nx
 import pandapower
-import grid2op
 from collections import defaultdict
 from pathlib import Path as p
 from cyber.assets import CyberDevice, Defence, Vulnerability
@@ -26,7 +25,7 @@ class CommNetwork(object):
     def __init__(self, n_devices:int=20,
                  children_per_parent:int=3, child_no_deviation:int=2,
                  network_specs:p=p.cwd() / "specifications" / "Default_specifications.json",
-                 grid:pandapower.pandapowerNet|grid2op.Environment.BaseEnv|None=None,
+                 grid:pandapower.pandapowerNet|None=None,
                  enable_sibling_to_sibling_comm:bool=False,
                  n_entrypoints:int=3):
         """
@@ -47,7 +46,7 @@ class CommNetwork(object):
                 Specifications of network. This is a JSON dictionary that provides details on
                 devices, aggregators and the root node.
                 Defaults to {}.
-            grid (pandapower.pandapowerNet | grid2op.Environment.BaseEnv | None, optional):
+            grid (pandapower.pandapowerNet | None, optional):
                 Specific pandapower grid to map communication network to. Will override 'n_devices'.
                 Defaults to None.
             enable_sibling_to_sibling_comm (bool, optional):
@@ -364,36 +363,6 @@ class CommNetwork(object):
         active_node.reset()
         for child in active_node.children:
             self.reset_cyber_components(active_node=child)
-    
-    @staticmethod
-    def evaluate_grid2op_conditions(device_type:dict, obs:grid2op.Observation, obj_ids):
-        """
-        Checks each object ID at a specific substation to see if it meets the conditions
-        given in the network's JSON specifications. 
-
-        Returns:
-            list: IDs that satisfy the condition.
-        """
-        conditions = device_type.get("conditions", None)
-        device_ids = copy.deepcopy(obj_ids)
-        if conditions is not None and len(obj_ids) > 0:
-            for condition in conditions:
-                # TODO: Check this works for multiple conditions
-                values = getattr(obs, condition["attribute"])[list(set(device_ids))]
-                match condition["action"]:
-                    case "filter":
-                        matching_ids = np.where((values >= condition.get("lb", -math.inf)) & \
-                                                (values < condition.get("ub", math.inf)))
-                        device_ids = device_ids[matching_ids]
-                    case "split":
-                        limit = condition.get("limit", math.inf)
-                        ids_to_split = device_ids[np.where(values > limit)]
-                        
-                        new_ids = [obj_id for obj_id in device_ids if obj_id not in ids_to_split]
-                        for i, id_to_split in enumerate(ids_to_split):
-                            new_ids.extend([id_to_split]*math.ceil(values[i] / limit))
-                        device_ids = new_ids
-        return device_ids
 
     @staticmethod
     def get_binary_attributes(configuration:dict, attributes:list[str], default:bool=False):
