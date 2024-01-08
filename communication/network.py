@@ -99,62 +99,85 @@ class CommNetwork(object):
             device_population = np.random.choice(categories, p=device_type_prob, replace=True, size=self.n_devices)
             device_map = [(i, cat_name, 1, None) for i, cat_name in enumerate(device_population)]
         # Apply rules in Specifications to assign 1 or more devices to equipment in the grid.
-        else: 
+        else:
             # Map device category (by name) to probability that device is of that category
             prob_lookup = {cat_name: prob for cat_name, prob in zip(categories, device_type_prob)}
+
+            # Find Voltage Level for all equipment
+            bus_lookup = {"line":"from_bus", "dcline":"from_bus", "impedance":"from_bus", "gen":"bus", "sgen":"bus",
+                          "load":"bus","switch":"bus", "motor":"bus", "asymmetric_load":"bus", "asymmetric_sgen":"bus",
+                          "shunt":"bus", "ward":"bus", "xward":"bus", "storage":"bus"}
+            volt_lookup = {}
+            for eqp_name, bus_attr in bus_lookup.items():
+                equip_df = getattr(self.grid, eqp_name)
+                buses = getattr(equip_df, bus_attr)
+                volt_lookup[eqp_name] = self.grid.bus.loc[buses].vn_kv.reset_index(drop=True)
 
             compat = {}
             for i, cat_name in enumerate(categories):
                 cat = cat_lookup[cat_name]
                 comp_devices = cat.get("compatible")
-                for comp_device, conditions in comp_devices.items():
-                    equip_df = getattr(self.grid, comp_device)
+                for device_kind, actions in comp_devices.items():
+                    equip_df = getattr(self.grid, device_kind)
 
                     # DataFrame with probability of choosing each Device Category (e.g. different types of smart meters)
-                    if comp_device not in compat:
-                        compat[comp_device] = dict(
+                    if device_kind not in compat:
+                        compat[device_kind] = dict(
                             probs=pd.DataFrame(np.zeros((equip_df.shape[0], len(categories))), columns=categories),
                             splits=pd.DataFrame(np.ones((equip_df.shape[0], len(categories))), columns=categories, dtype=np.int16),
                         )
-                    # Find Equipment that meets Conditions
-                    if "filter" in conditions:
-                        condition = conditions["filter"]
-                        criteria = equip_df.get(condition["attribute"])
-                        mask = (criteria >= condition.get("lb", -math.inf)) & \
-                            (criteria <= condition.get("ub",  math.inf))
-                        compat[comp_device]["probs"].iloc[mask, i] = prob_lookup[cat_name]
+                    # Filter out equipment that doesn't meet conditions
+                    if "filter" in actions:
+                        conditions = actions["filter"] # Can filter my multiple conditions
+                        mask = np.ones(equip_df.shape[0], dtype=bool)
+                        for condition in conditions:
+                            criteria = equip_df.get(condition["attribute"]) if condition["attribute"] != "voltage" else volt_lookup[device_kind]
+                            if "eq" in condition:
+                                mask = mask & (criteria == condition["eq"])
+                            else:
+                                mask = mask & (criteria >= condition.get("lb", -math.inf)) & \
+                                              (criteria <= condition.get("ub",  math.inf))
+                        compat[device_kind]["probs"].loc[mask, cat_name] = prob_lookup[cat_name]
                     else:
-                        compat[comp_device]["probs"].iloc[:, i] = prob_lookup[cat_name]
+                        compat[device_kind]["probs"].loc[:, cat_name] = prob_lookup[cat_name]
 
-                    if "split" in conditions:
-                        condition = conditions["split"]
+                    # Splits equipment that exceeds limits
+                    if "split" in actions:
+                        condition = actions["split"] # Can only split by a single condition
                         criteria = equip_df.get(condition["attribute"])
                         min_splits = criteria.floordiv(condition.get("limit", math.inf)).astype(np.int16)
                         leftover_split = (criteria.mod(condition.get("limit", math.inf)) > 0).astype(np.int16)
-                        compat[comp_device]["splits"].iloc[:, i] = min_splits + leftover_split
+                        compat[device_kind]["splits"].loc[:, cat_name] = min_splits + leftover_split
                     
             select_compatible_device_category = lambda p: np.random.choice(categories, p=p)
-            
+                
             no_of_devices = 0
             device_map = []
-            equipment_set = {}
-            for comp_device in compat.keys():
-                equip_df = getattr(self.grid, comp_device)
-
+            for device_kind, compatability in compat.items():
                 # Normalize probabilities (must sum to 1)
-                probs = compat[comp_device]["probs"]
+                probs = compatability["probs"]
                 probs = probs.div(probs.sum(axis=1), axis=0).dropna()
+                if len(probs) == 0: # No compatible components
+                    continue
+                
+                # Get information about the connected equipment
+                equip_df = getattr(self.grid, device_kind)
 
                 # Select device category
                 equip_df["Category"] = probs.apply(select_compatible_device_category, axis=1)
+                mask = ~equip_df.Category.isna()
                 equip_df.dropna(subset=["Category"], inplace=True)
 
                 # Split device if equipment exceeds size limit
+                def select_no_of_splits(row):
+                    category = equip_df.Category.loc[row.name].item()
+                    n_splits = row[category]
+                    return n_splits
                 select_no_of_splits = lambda row: row[equip_df.Category.loc[row.name].item()]
-                equip_df["Splits"] = compat[comp_device]["splits"].apply(select_no_of_splits, axis=1)
+                equip_df["Splits"] = compatability["splits"].loc[mask].apply(select_no_of_splits, axis=1)
 
-                device_map.extend([(no_of_devices + i, equip_df.iloc[i, -2], equip_df.iloc[i, -1],
-                                    Equipment(idx, kind=comp_device)) for idx in equip_df.index])
+                device_map.extend([(no_of_devices + count, equip_df.loc[idx, "Category"], equip_df.loc[idx, "Splits"],
+                                    Equipment(idx, kind=device_kind)) for count, idx in enumerate(equip_df.index)])
                 no_of_devices = len(device_map)
 
         # Create Devices
