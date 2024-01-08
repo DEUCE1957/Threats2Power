@@ -166,7 +166,7 @@ class CommNetwork(object):
                 # Select device category
                 equip_df["Category"] = probs.apply(select_compatible_device_category, axis=1)
                 mask = ~equip_df.Category.isna()
-                equip_df.dropna(subset=["Category"], inplace=True)
+                equip_df = equip_df.dropna(subset=["Category"])
 
                 # Split device if equipment exceeds size limit
                 def select_no_of_splits(row):
