@@ -101,7 +101,8 @@ class Analyzer():
             print("\n".join(f"{k} devices: {v}" for k,v in sorted(self.res_static.items(),key=lambda item: item[0])))
         return self.res_static
     
-    def monte_carlo_analysis(self, n_attacks:int, budget:float, attacker_variant:Attacker=RandomAttacker, device_only:bool=True, **kwargs):
+    def monte_carlo_analysis(self, n_attacks:int, budget:float, attacker_variant:Attacker=RandomAttacker,
+                             device_only:bool=True, **kwargs):
         """
         Approximate the true probability of compromising N devices by running many randomly
         varying attacks on the same communication network. The approximation becomes more

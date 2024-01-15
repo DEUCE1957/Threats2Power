@@ -71,7 +71,7 @@ class CommNetwork(object):
         # Generate Communication Network (Procedurally)
         self.n_components = 0
         self.node_ids = []
-        self.equip_to_device = defaultdict(list)
+        self.equip_to_device = {}
         self.id_to_node = {} # Does not include root
         self.root = self.build_network(components=[])
         self.entrypoints = []
@@ -196,7 +196,9 @@ class CommNetwork(object):
                 CommNetwork.attach_cyber_characteristics(device, cat)
                 components.append(device)
                 self.node_ids.append(device.id)
-                self.equip_to_device[equip].append(device.id)
+                if equip.kind not in self.equip_to_device:
+                    self.equip_to_device[equip.kind] = defaultdict(list)
+                self.equip_to_device[equip.kind][equip.name].append(device.id)
                 self.id_to_node[device.id] = device
                 self.n_components += 1
         return components
