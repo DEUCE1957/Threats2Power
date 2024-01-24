@@ -1,5 +1,5 @@
 {"device": {"categories":[
-  {"name": "OldSmartMeter",
+  {"name": "Vendor A",
    "is_sensor": true,
    "is_controller": false,
    "is_autonomous": false,
@@ -9,7 +9,7 @@
      "effort": {"distribution": {"name": "expon",
        "kwds": {"loc": 0, "scale": 5}}}}],
    "vulnerabilities": []},
-   {"name": "ModernSmartMeter",
+   {"name": "Vendor B",
    "is_sensor": true,
    "is_controller": true,
    "is_autonomous": false,

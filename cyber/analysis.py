@@ -102,7 +102,7 @@ class Analyzer():
         return self.res_static
     
     def monte_carlo_analysis(self, n_attacks:int, budget:float, attacker_variant:Attacker=RandomAttacker,
-                             device_only:bool=True, **kwargs):
+                             device_only:bool=True, vary_entrypoints:bool=False, **kwargs):
         """
         Approximate the true probability of compromising N devices by running many randomly
         varying attacks on the same communication network. The approximation becomes more
@@ -117,16 +117,23 @@ class Analyzer():
             device_only (bool): Whether to only count compromised devices (leaf nodes) in the total tally.
                 Defaults to True.
         """
-        self.res_monte["compromised"] = np.zeros(shape=n_attacks, dtype=np.int16)
-        self.res_monte["effort"] = np.zeros(shape=n_attacks, dtype=np.float32)
-        self.res_monte.update(dict(attacker_variant=attacker_variant, budget=budget, n_attacks=n_attacks))
-        for attack_no in tqdm(range(n_attacks), desc="Attack "):
-            attacker = attacker_variant(budget=budget, verbose=False)
-            nodes_compromised, total_effort_spent = attacker.attack_network(self.network)
-            self.res_monte["compromised"][attack_no] = len([n for n in nodes_compromised if \
-                                                (isinstance(n, Device) if device_only else True)])
-            self.res_monte["effort"][attack_no] = total_effort_spent
-            self.network.reset()
+        N = n_attacks * (self.network.n_components if vary_entrypoints else self.network.n_entrypoints)
+        self.res_monte["compromised"] = np.zeros(shape=N, dtype=np.int16)
+        self.res_monte["effort"] = np.zeros(shape=N, dtype=np.float32)
+        self.res_monte.update(dict(attacker_variant=attacker_variant, budget=budget, n_attacks=N))
+        original_entrypoints = [n.id for n in self.network.entrypoints]
+        entrypoints = self.network.node_ids if vary_entrypoints else original_entrypoints
+        for i, entrypoint_id in tqdm(enumerate(entrypoints), desc="Entrypoint "): 
+            # Consider attacks eminating from specific entrypoint
+            self.network.set_entrypoints(entrypoint_id)
+            for attack_no in tqdm(range(n_attacks), desc="Attack "):
+                attacker = attacker_variant(budget=budget, verbose=False)
+                nodes_compromised, total_effort_spent = attacker.attack_network(self.network)
+                self.res_monte["compromised"][i*n_attacks+attack_no] = len([n for n in nodes_compromised if \
+                                                    (isinstance(n, Device) if device_only else True)])
+                self.res_monte["effort"][i*n_attacks+attack_no] = total_effort_spent
+                self.network.reset(entrypoint_id)
+        self.network.reset(original_entrypoints)
         return self.res_monte["compromised"], self.res_monte["effort"]
     
     def monte_carlo_multi_analysis(self, seed:int, param_name:str, param_values, **kwargs):
@@ -197,7 +204,7 @@ class Analyzer():
         if self.res_static != {}:
             fig, ax = plt.subplots(nrows=1, ncols=1, figsize=(8,6))
             sns.barplot(self.res_static, ax=ax)
-            ax.set(ylabel="Probability", xlabel="Devices")
+            ax.set(ylabel="Probability", xlabel="Components")
 
             fig.suptitle(f"Network Size: {self.network.n_components}, No. of Devices: {self.network.n_devices}, " + 
                         f"No. of Entrypoints: {self.network.n_entrypoints}", 

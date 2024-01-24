@@ -176,6 +176,7 @@ class CommNetwork(object):
                 select_no_of_splits = lambda row: row[equip_df.Category.loc[row.name].item()]
                 equip_df["Splits"] = compatability["splits"].loc[mask].apply(select_no_of_splits, axis=1)
 
+                # Add Device Idx, Device Category, No. of Splits and Associated Equipment to device map
                 device_map.extend([(no_of_devices + count, equip_df.loc[idx, "Category"], equip_df.loc[idx, "Splits"],
                                     Equipment(idx, kind=device_kind)) for count, idx in enumerate(equip_df.index)])
                 no_of_devices = len(device_map)
@@ -196,9 +197,10 @@ class CommNetwork(object):
                 CommNetwork.attach_cyber_characteristics(device, cat)
                 components.append(device)
                 self.node_ids.append(device.id)
-                if equip.kind not in self.equip_to_device:
-                    self.equip_to_device[equip.kind] = defaultdict(list)
-                self.equip_to_device[equip.kind][equip.name].append(device.id)
+                if equip is not None:
+                    if equip.kind not in self.equip_to_device:
+                        self.equip_to_device[equip.kind] = defaultdict(list)
+                    self.equip_to_device[equip.kind][equip.name].append(device.id)
                 self.id_to_node[device.id] = device
                 self.n_components += 1
         return components
@@ -313,7 +315,7 @@ class CommNetwork(object):
             return root
         return self.build_network(components)
     
-    def set_entrypoints(self):
+    def set_entrypoints(self, possible_entrypoints:int|None=None):
         """
         Randomly set entry points at devices or aggregators in the network.
         Excludes control center / root.
@@ -322,9 +324,12 @@ class CommNetwork(object):
         for entrypoint in self.entrypoints:
             entrypoint.is_accessible = False
         self.entrypoints = []
-        accessible_ids = np.random.choice(self.node_ids,
+        if possible_entrypoints is not None: # Select from a list of specific entrypoints
+            accessible_ids = possible_entrypoints if isinstance(possible_entrypoints, list) else [possible_entrypoints]
+        else: # Select from a list of all assets
+            accessible_ids = np.random.choice(self.node_ids,
                                               min(self.n_components - 1, self.n_entrypoints),
-                                              replace=False)
+                                                replace=False)
         for accessible_id in accessible_ids:
             component = self.id_to_node[accessible_id]
             component.is_accessible = True
@@ -370,11 +375,11 @@ class CommNetwork(object):
         for child in root.children:
             self.walk_and_set_entrypoints(child, ids_to_match)
     
-    def reset(self):
+    def reset(self, possible_entrypoints:int|None=None):
         """
         Resets the network, including setting new entrypoint(s)
         """
-        self.set_entrypoints()
+        self.set_entrypoints(possible_entrypoints)
         self.reset_cyber_components(active_node=self.root)
         self.graph = self.build_graph(self.root, graph=nx.DiGraph())
 

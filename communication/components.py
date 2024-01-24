@@ -14,6 +14,7 @@ class Equipment():
         
         self.name = name
         self.kind = kind
+        self.criticality = 0
         self.id = f"{self.kind}_{self.name}"
 
     def __str__(self):
