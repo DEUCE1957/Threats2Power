@@ -135,37 +135,41 @@ def add_transformers(ax, grid, **kwargs):
                                         fc="white", ec="black")
     return ax, legend_entry, coords
 
-def add_line_switches(ax, grid, **kwargs):
-    line_switches = grid.switch[grid.switch.et == "l"]
+def add_switches(ax, grid, **kwargs):
+    switches = grid.switch#[grid.switch.et == "l"]
     coords = []
-    for idx in line_switches.index:
+    for idx in switches.index:
         # Switch Element (placed towards a bus, on a specific line)
-        line_switch = line_switches.loc[idx]
+        switch = switches.loc[idx]
 
         # Find line that this switch is placed at
-        line_with_switch = grid.line.loc[line_switch.element]
+        if switch.et == "l":
+            line_with_switch = grid.line.loc[switch.element]
+            from_bus, to_bus = line_with_switch.from_bus, line_with_switch.to_bus
+        elif switch.et == "t":
+            trafo_with_switch = grid.trafo.loc[switch.element]
+            from_bus, to_bus = trafo_with_switch.lv_bus, trafo_with_switch.hv_bus
         
         # Find the start and end points of the switch's line
-        from_bus, to_bus = line_with_switch.from_bus, line_with_switch.to_bus
         end_point_buses = grid.bus_geodata.loc[[from_bus,to_bus]]
         x0, x1 = end_point_buses.x.values
         y0, y1 = end_point_buses.y.values
-        xpos, ypos = place_along_line((x0,y0),(x1, y1), pos=0.8 if to_bus == line_switch.bus else 0.2)
+        xpos, ypos = place_along_line((x0,y0),(x1, y1), pos=0.8 if to_bus == switch.bus else 0.2)
         coords.append((xpos, ypos))
 
         # Create Line Switch Element (Patch)
-        line_switch = ElectricalPatchMaker(symbol="line_switch", x0=xpos, y0=ypos,
-                                           open=not line_switch.closed, **kwargs)
+        switch = ElectricalPatchMaker(symbol="switch", x0=xpos, y0=ypos,
+                                           open=not switch.closed, **kwargs)
         
         # Transform to align with the line
-        rotate = Affine2D().rotate_around(*line_switch.centroid, rotate_to_align((x0,y0), (x1,y1)))
+        rotate = Affine2D().rotate_around(*switch.centroid, rotate_to_align((x0,y0), (x1,y1)))
         transform = rotate + ax.transData
-        line_switch.patch.set_transform(transform)
-        line_switch.centroid = rotate.transform_point(line_switch.centroid)
+        switch.patch.set_transform(transform)
+        switch.centroid = rotate.transform_point(switch.centroid)
 
         # Display the Line Switch
-        ax.add_patch(line_switch.patch)
-    legend_entry = ElectricalPatchMaker(symbol="line_switch", x0=12, y0=5, size=10, lw=2,
+        ax.add_patch(switch.patch)
+    legend_entry = ElectricalPatchMaker(symbol="switch", x0=12, y0=5, size=10, lw=2,
                                         fc="white", ec="black")
     return ax, legend_entry, coords
 
@@ -205,7 +209,7 @@ def plot_physical_grid(network:CommNetwork,
                                  ec=color_by(network, "trafo"), fc="white", zorder=10)
 
     # Line Switches (placed on line)
-    ax, line_switch, coords["line_switch"] = add_line_switches(ax, grid, size=size, ec="black", zorder=10)
+    ax, switch, coords["switch"] = add_switches(ax, grid, size=size, ec="black", zorder=10)
     
     # Static Generators
     ax, sgen, coords["sgen"] = add_symbol(ax, grid, symbol="sgen", distance=distance,
@@ -225,7 +229,7 @@ def plot_physical_grid(network:CommNetwork,
     
     # Legend (with custom symbols)
     legend_map = {"Bus":bus, "Generator":sgen, "Load":load, "Transformer":trafo,
-                  "External Grid":ext_grid, "Switch":line_switch}
+                  "External Grid":ext_grid, "Switch":switch}
     labels, handles = zip(*sorted(zip(*(legend_map.keys(), legend_map.values())), key=lambda t: t[0]))
     nrows = 1 + (len(labels) // 3)
     if show_legend:

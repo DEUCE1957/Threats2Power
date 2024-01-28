@@ -59,8 +59,8 @@ def monte_process(process_idx, seed, n_attacks=1000, budget=52, **network_kwargs
 
     analyzer = Analyzer(pcn)
 
-    compromised_array, effort_array = analyzer.monte_carlo_analysis(n_attacks, budget, **network_kwargs)
-    return process_idx, compromised_array, effort_array
+    compromised_array, effort_array, critical_array = analyzer.monte_carlo_analysis(n_attacks, budget, **network_kwargs)
+    return process_idx, compromised_array, effort_array, critical_array
 
 class Analyzer():
 
@@ -117,10 +117,11 @@ class Analyzer():
             device_only (bool): Whether to only count compromised devices (leaf nodes) in the total tally.
                 Defaults to True.
         """
-        N = n_attacks * (self.network.n_components if vary_entrypoints else self.network.n_entrypoints)
-        self.res_monte["compromised"] = np.zeros(shape=N, dtype=np.int16)
-        self.res_monte["effort"] = np.zeros(shape=N, dtype=np.float32)
-        self.res_monte.update(dict(attacker_variant=attacker_variant, budget=budget, n_attacks=N))
+        M = self.network.n_components if vary_entrypoints else self.network.n_entrypoints
+        self.res_monte["compromised"] = np.zeros(shape=(n_attacks, M), dtype=np.int16)
+        self.res_monte["effort"] = np.zeros(shape=(n_attacks, M), dtype=np.float32)
+        self.res_monte["criticality"] = np.zeros(shape=(n_attacks, M), dtype=np.float32)
+        self.res_monte.update(dict(attacker_variant=attacker_variant, budget=budget, n_attacks=n_attacks))
         original_entrypoints = [n.id for n in self.network.entrypoints]
         entrypoints = self.network.node_ids if vary_entrypoints else original_entrypoints
         for i, entrypoint_id in tqdm(enumerate(entrypoints), desc="Entrypoint "): 
@@ -129,12 +130,18 @@ class Analyzer():
             for attack_no in tqdm(range(n_attacks), desc="Attack "):
                 attacker = attacker_variant(budget=budget, verbose=False)
                 nodes_compromised, total_effort_spent = attacker.attack_network(self.network)
-                self.res_monte["compromised"][i*n_attacks+attack_no] = len([n for n in nodes_compromised if \
-                                                    (isinstance(n, Device) if device_only else True)])
-                self.res_monte["effort"][i*n_attacks+attack_no] = total_effort_spent
+                # Count how many nodes were compromised (and add up their criticality)
+                critical_sum, device_count = 0, 0
+                for n in nodes_compromised:
+                    if isinstance(n, Device):
+                        critical_sum += n.equipment.criticality
+                        device_count += 1
+                self.res_monte["compromised"][attack_no, i] = device_count if device_only else len(nodes_compromised)
+                self.res_monte["effort"][attack_no, i] = total_effort_spent
+                self.res_monte["criticality"][attack_no, i] = critical_sum
                 self.network.reset(entrypoint_id)
         self.network.reset(original_entrypoints)
-        return self.res_monte["compromised"], self.res_monte["effort"]
+        return self.res_monte["compromised"], self.res_monte["effort"], self.res_monte["criticality"]
     
     def monte_carlo_multi_analysis(self, seed:int, param_name:str, param_values, **kwargs):
         """
@@ -153,8 +160,10 @@ class Analyzer():
 
         n_samples = kwargs.get("n_attacks", 1000) if param_name != "n_attacks" else max(param_values)
         n_processes = len(param_values) if param_name != "n_attacks" else 1
-        self.res_monte["compromised"] = np.zeros(shape=(n_samples, n_processes), dtype=np.int16)
-        self.res_monte["effort"] = np.zeros(shape=(n_samples, n_processes), dtype=np.float32)
+        n_entrypoints = kwargs.get("n_entrypoints", 1)
+        self.res_monte["compromised"] = np.zeros(shape=(n_samples, n_entrypoints, n_processes), dtype=np.int16)
+        self.res_monte["effort"] = np.zeros(shape=(n_samples, n_entrypoints, n_processes), dtype=np.float32)
+        self.res_monte["criticality"] = np.zeros(shape=(n_samples, n_entrypoints, n_processes), dtype=np.float32)
         self.res_monte.update(dict(param_name=param_name, param_values=param_values))
         print(f"CPU Thread Count: {mp.cpu_count()-2}")
 
@@ -168,10 +177,11 @@ class Analyzer():
                 )
             
             for result in results:
-                process_idx, compromises, efforts = result.get()
-                self.res_monte["compromised"][:, process_idx] = compromises
-                self.res_monte["effort"][:, process_idx] = efforts
-        return self.res_monte["compromised"], self.res_monte["effort"]
+                process_idx, compromises, efforts, criticality = result.get()
+                self.res_monte["compromised"][:, :, process_idx] = compromises
+                self.res_monte["effort"][:, :, process_idx] = efforts
+                self.res_monte["criticality"][:, :, process_idx] = criticality
+        return self.res_monte["compromised"], self.res_monte["effort"], self.res_monte["criticality"]
     
     def plot_monte(self):
         if self.res_monte != {}:

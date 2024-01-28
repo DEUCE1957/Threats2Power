@@ -26,8 +26,9 @@ class CommNetwork(object):
                  children_per_parent:int=3, child_no_deviation:int=2,
                  network_specs:p=p.cwd() / "specifications" / "Default_specifications.json",
                  grid:pandapower.pandapowerNet|None=None,
+                 criticality:dict[str:np.ndarray]=None,
                  enable_sibling_to_sibling_comm:bool=False,
-                 n_entrypoints:int=3):
+                 n_entrypoints:int=1):
         """
         The topology of the communication network is procedurally generated based on the
         parameters set here.
@@ -49,31 +50,40 @@ class CommNetwork(object):
             grid (pandapower.pandapowerNet | None, optional):
                 Specific pandapower grid to map communication network to. Will override 'n_devices'.
                 Defaults to None.
+            criticality (dict<str:np.ndarray>):
+                Map physical grid equipment to a criticality level
             enable_sibling_to_sibling_comm (bool, optional):
                 Whether to have lateral connections as well between nodes with the same parent.
                 Defaults to False.
             n_entrypoints (int, optional):
                 Number of entrypoints for attackers.
-                Defaults to 3.
+                Defaults to 1.
         """
         self.n_devices = n_devices
 
         # Redundancy (no. of children per aggregator)
         self.children_per_parent = children_per_parent
         self.child_no_deviation = child_no_deviation
-        
+
         with open(network_specs, "r", encoding="utf-8") as f:
             self.specs = json.load(f, cls=SpecDecoder)
+        
+        # Physical Grid
         self.grid = grid
+        self.criticality = criticality
+        self.equip_to_device = {}
+        
+        # Communication Network
+        self.n_components = 0
         self.enable_sibling_to_sibling_comm = enable_sibling_to_sibling_comm
-        self.n_entrypoints = n_entrypoints
+        self.node_ids = []
+        self.id_to_node = {} # Does not include root
 
         # Generate Communication Network (Procedurally)
-        self.n_components = 0
-        self.node_ids = []
-        self.equip_to_device = {}
-        self.id_to_node = {} # Does not include root
         self.root = self.build_network(components=[])
+
+        # Set Entrypoints (for cyberattacks)
+        self.n_entrypoints = n_entrypoints
         self.entrypoints = []
         self.set_entrypoints()
         self.graph = self.build_graph(self.root, nx.DiGraph())
@@ -97,7 +107,7 @@ class CommNetwork(object):
         # Device Type is based on statistic / expected proportion
         if self.grid is None: 
             device_population = np.random.choice(categories, p=device_type_prob, replace=True, size=self.n_devices)
-            device_map = [(i, cat_name, 1, None) for i, cat_name in enumerate(device_population)]
+            devices = [(i, cat_name, 1, None) for i, cat_name in enumerate(device_population)]
         # Apply rules in Specifications to assign 1 or more devices to equipment in the grid.
         else:
             # Map device category (by name) to probability that device is of that category
@@ -152,7 +162,7 @@ class CommNetwork(object):
             select_compatible_device_category = lambda p: np.random.choice(categories, p=p)
                 
             no_of_devices = 0
-            device_map = []
+            devices = []
             for device_kind, compatability in compat.items():
                 # Normalize probabilities (must sum to 1)
                 probs = compatability["probs"]
@@ -176,13 +186,23 @@ class CommNetwork(object):
                 select_no_of_splits = lambda row: row[equip_df.Category.loc[row.name].item()]
                 equip_df["Splits"] = compatability["splits"].loc[mask].apply(select_no_of_splits, axis=1)
 
-                # Add Device Idx, Device Category, No. of Splits and Associated Equipment to device map
-                device_map.extend([(no_of_devices + count, equip_df.loc[idx, "Category"], equip_df.loc[idx, "Splits"],
-                                    Equipment(idx, kind=device_kind)) for count, idx in enumerate(equip_df.index)])
-                no_of_devices = len(device_map)
+                # Add Device Idx, Device Category, No. of Splits and Associated Equipment to devices
+                for count, idx in enumerate(equip_df.index):
+                    i = no_of_devices + count
+                    cat_name = equip_df.loc[idx, "Category"]
+                    n_splits = equip_df.loc[idx, "Splits"]
+                    # Link the criticality of the component (if it is defined)
+                    if self.criticality is None:
+                        equip = Equipment(idx, kind=device_kind)
+                    else:
+                        equip = Equipment(idx, kind=device_kind, criticality=self.criticality[device_kind][idx])
+                    devices.append((i, cat_name, n_splits, equip))
+                devices.extend([(no_of_devices + count, equip_df.loc[idx, "Category"], equip_df.loc[idx, "Splits"],
+                                 equip) for count, idx in enumerate(equip_df.index)])
+                no_of_devices = len(devices)
 
         # Create Devices
-        for i, cat_name, n_splits, equip in device_map:
+        for i, cat_name, n_splits, equip in devices:
             cat = cat_lookup[cat_name]
             device_name = cat.get("name", "Device")
             device_attrs =  CommNetwork.get_binary_attributes(cat,

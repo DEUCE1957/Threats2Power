@@ -49,7 +49,7 @@ class ElectricalPatchMaker():
         centroid = x0, y0
         return ext_grid_patch, centroid
 
-    def line_switch(self, x0=0, y0=0, size=1, open=True, **kwargs):
+    def switch(self, x0=0, y0=0, size=1, open=True, **kwargs):
         kwargs["fc"] = "white" if open else kwargs.get("ec", "black")
         line_path = mpath.Path(vertices=[(x0-size/2, y0-size/2), (x0+size/2, y0-size/2),
                                          (x0+size/2, y0+size/2), (x0-size/2, y0+size/2),

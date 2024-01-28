@@ -6,15 +6,20 @@ from cyber.assets import CyberDevice
 class Equipment():
     __name__ = "Equipment"
 
-    def __init__(self, name:str, kind:pp_elements(), *args, **kwargs) -> None:
+    def __init__(self, name:str, kind:pp_elements(), *args, criticality:float=0, **kwargs) -> None:
         """
         Representation of specific PandaPower equipment, such as a transformer ('trafo') or
         a generator ('gen').
+
+        Args:
+            name:str: Name of the equipment (e.g. '6')
+            kind:str: Type of equipment in PandaPower (e.g. 'sgen')
+            criticality:
         """
         
         self.name = name
         self.kind = kind
-        self.criticality = 0
+        self.criticality = criticality
         self.id = f"{self.kind}_{self.name}"
 
     def __str__(self):
