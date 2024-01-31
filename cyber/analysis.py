@@ -117,11 +117,12 @@ class Analyzer():
             device_only (bool): Whether to only count compromised devices (leaf nodes) in the total tally.
                 Defaults to True.
         """
-        M = self.network.n_components if vary_entrypoints else self.network.n_entrypoints
-        self.res_monte["compromised"] = np.zeros(shape=(n_attacks, M), dtype=np.int16)
-        self.res_monte["effort"] = np.zeros(shape=(n_attacks, M), dtype=np.float32)
-        self.res_monte["criticality"] = np.zeros(shape=(n_attacks, M), dtype=np.float32)
-        self.res_monte.update(dict(attacker_variant=attacker_variant, budget=budget, n_attacks=n_attacks))
+        # Either use all components as an entrypoint, or the existing entrypoints
+        n_entrypoints = self.network.n_components if vary_entrypoints else self.network.n_entrypoints
+        self.res_monte["compromised"] = np.zeros(shape=(n_attacks, n_entrypoints), dtype=np.int16)
+        self.res_monte["effort"] = np.zeros(shape=(n_attacks, n_entrypoints), dtype=np.float32)
+        self.res_monte["criticality"] = np.zeros(shape=(n_attacks, n_entrypoints), dtype=np.float32)
+        self.res_monte.update(dict(attacker_variant=attacker_variant, budget=budget, n_attacks=n_attacks, n_entrypoints=n_entrypoints))
         original_entrypoints = [n.id for n in self.network.entrypoints]
         entrypoints = self.network.node_ids if vary_entrypoints else original_entrypoints
         for i, entrypoint_id in tqdm(enumerate(entrypoints), desc="Entrypoint "): 

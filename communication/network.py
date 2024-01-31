@@ -7,6 +7,7 @@ import networkx as nx
 import pandapower
 from collections import defaultdict
 from pathlib import Path as p
+from scipy.stats import distributions as distr
 from cyber.assets import CyberDevice, Defence, Vulnerability
 from communication.graph import CommNode, CommEdge
 from communication.components import Equipment, Device, Aggregator
@@ -27,7 +28,9 @@ class CommNetwork(object):
                  network_specs:p=p.cwd() / "specifications" / "Default_specifications.json",
                  grid:pandapower.pandapowerNet|None=None,
                  criticality:dict[str:np.ndarray]=None,
-                 enable_sibling_to_sibling_comm:bool=False,
+                 crit_norm:bool=False,
+                 effort_only:bool=False,
+                 sibling_to_sibling_comm:[None, "adjacent", "all"]=None,
                  n_entrypoints:int=1):
         """
         The topology of the communication network is procedurally generated based on the
@@ -51,38 +54,52 @@ class CommNetwork(object):
                 Specific pandapower grid to map communication network to. Will override 'n_devices'.
                 Defaults to None.
             criticality (dict<str:np.ndarray>):
-                Map physical grid equipment to a criticality level
-            enable_sibling_to_sibling_comm (bool, optional):
-                Whether to have lateral connections as well between nodes with the same parent.
+                Map of physical grid equipment to a criticality level
+            crit_norm (bool, optional):
+                Whether to normalize the criticality to sum to 1 when all devices are compromised.
                 Defaults to False.
+            effort_only (bool, optional):
+                Whether to only consider effort when performing cyberattacks (i.e. gauranteed
+                to succeed if sufficient effort is spent). Overrides specifications and does
+                NOT apply to vulnerabilities.
+                Defaults to False.
+            sibling_to_sibling_comm (str, optional):
+                What kind of lateral connections exist between nodes with the same parent.
+                Defaults to None.
             n_entrypoints (int, optional):
                 Number of entrypoints for attackers.
                 Defaults to 1.
         """
-        self.n_devices = n_devices
-
-        # Redundancy (no. of children per aggregator)
-        self.children_per_parent = children_per_parent
-        self.child_no_deviation = child_no_deviation
-
+        # Specifications
         with open(network_specs, "r", encoding="utf-8") as f:
             self.specs = json.load(f, cls=SpecDecoder)
         
         # Physical Grid
         self.grid = grid
         self.criticality = criticality
+        self.crit_norm = crit_norm
+        # Criticality if all devices are compromised (for normalization)
+        self.maximum_criticality = 0
         self.equip_to_device = {}
         
         # Communication Network
+        self.n_devices = n_devices
         self.n_components = 0
-        self.enable_sibling_to_sibling_comm = enable_sibling_to_sibling_comm
+        # Procedural parameters
+        self.sibling_to_sibling_comm = sibling_to_sibling_comm
+        self.children_per_parent = children_per_parent
+        self.child_no_deviation = child_no_deviation
+        # Lookup Utilities
         self.node_ids = []
         self.id_to_node = {} # Does not include root
+        self.equipment = []
 
         # Generate Communication Network (Procedurally)
         self.root = self.build_network(components=[])
 
-        # Set Entrypoints (for cyberattacks)
+        # Cyber Security
+        self.effort_only = effort_only
+        # Entrypoints are possible starting nodes for cyberattacks
         self.n_entrypoints = n_entrypoints
         self.entrypoints = []
         self.set_entrypoints()
@@ -91,7 +108,12 @@ class CommNetwork(object):
     def build_leaves(self, prop:np.ndarray=None):
         """
         Construct the leaf nodes of the network. Leaf nodes have no children.
-
+        
+        Args:
+            prop [np.ndarray]: Proportion of each kind of device. For example,
+            60% Vendor A vs 40% Vendor B.
+                Defaults to None.
+        
         Returns:
             list[TreeNode]: Collection of leaf nodes
         """
@@ -191,11 +213,15 @@ class CommNetwork(object):
                     i = no_of_devices + count
                     cat_name = equip_df.loc[idx, "Category"]
                     n_splits = equip_df.loc[idx, "Splits"]
-                    # Link the criticality of the component (if it is defined)
+                    # Link the Criticality of the component (if it is defined)
                     if self.criticality is None:
                         equip = Equipment(idx, kind=device_kind)
                     else:
-                        equip = Equipment(idx, kind=device_kind, criticality=self.criticality[device_kind][idx])
+                        # Criticality is divided by number of splits (!)
+                        criticality = self.criticality[device_kind][idx] / n_splits
+                        equip = Equipment(idx, kind=device_kind,
+                                          criticality=criticality)
+                        self.maximum_criticality += criticality
                     devices.append((i, cat_name, n_splits, equip))
                 devices.extend([(no_of_devices + count, equip_df.loc[idx, "Category"], equip_df.loc[idx, "Splits"],
                                  equip) for count, idx in enumerate(equip_df.index)])
@@ -208,6 +234,7 @@ class CommNetwork(object):
             device_attrs =  CommNetwork.get_binary_attributes(cat,
                             ["is_sensor", "is_controller", "is_accessible", "is_autonomous"])
             for _ in range(n_splits):
+                # Create and configure device
                 device = Device(name=device_name,
                                 equipment=equip,
                                 is_controller=device_attrs["is_controller"],
@@ -215,13 +242,20 @@ class CommNetwork(object):
                                 is_autonomous=device_attrs["is_autonomous"],
                                 is_accessible=device_attrs["is_accessible"],)
                 CommNetwork.attach_cyber_characteristics(device, cat)
-                components.append(device)
-                self.node_ids.append(device.id)
+                
+                # Find all devices connected to specific physical equipment (e.g. a generator)
                 if equip is not None:
                     if equip.kind not in self.equip_to_device:
                         self.equip_to_device[equip.kind] = defaultdict(list)
                     self.equip_to_device[equip.kind][equip.name].append(device.id)
+                
+                # Lookup Utilities
+                self.node_ids.append(device.id)
+                self.equipment.append(equip)
                 self.id_to_node[device.id] = device
+
+                # Add device to components (to allocate to aggregators)
+                components.append(device)
                 self.n_components += 1
         return components
     
@@ -256,7 +290,7 @@ class CommNetwork(object):
                 n_children = max(n_children, sum_so_far - len(components))
             else: # Positive must at least be 1, up to the maximum no. of remaining components
                 n_children = max(1, min(n_children, len(components) - sum_so_far))
-            children_per_aggregator.append(np.abs(n_children)) 
+            children_per_aggregator.append(np.abs(n_children))
 
             if n_children <= 1: # Assign children to higher level in hierarchy
                 skipped_children.extend(components[sum_so_far:sum_so_far+np.abs(n_children)] if \
@@ -275,10 +309,15 @@ class CommNetwork(object):
                     component.update_parents(aggregator)
                     CommNetwork.connect_by_edges(aggregator, component)
                     # Connect siblings
-                    if i >= 1 and self.enable_sibling_to_sibling_comm:
-                        prev_component = components[sum_so_far + (i-1)]
-                        if prev_component.__class__ == component.__class__:
-                            CommNetwork.connect_by_edges(prev_component, component)
+                    if i >= 1 and self.sibling_to_sibling_comm:
+                        if self.sibling_to_sibling_comm == "adjacent":
+                            prev_component = components[sum_so_far + (i-1)]
+                            if prev_component.__class__ == component.__class__:
+                                CommNetwork.connect_by_edges(prev_component, component)
+                        else: # All siblings connected together
+                            for other_component in components[sum_so_far:sum_so_far+n_children]:
+                                if other_component != component:
+                                    CommNetwork.connect_by_edges(other_component, component)
 
                 # Keep Track of Nodes
                 aggregators.append(aggregator)
@@ -309,7 +348,7 @@ class CommNetwork(object):
             component.update_parents(root)
             CommNetwork.connect_by_edges(root, component)
             # Connect siblings
-            if i >= 1 and self.enable_sibling_to_sibling_comm:
+            if i >= 1 and self.sibling_to_sibling_comm:
                 prev_component = components[i - 1]
                 if prev_component.__class__ == component.__class__:
                     CommNetwork.connect_by_edges(prev_component, component)
@@ -333,6 +372,11 @@ class CommNetwork(object):
         else:
             root = self.build_root(components)
             return root
+        # Normalize criticality of components to [0, 1] range
+        if self.crit_norm and self.maximum_criticality > 0:
+            for equip in self.equipment:
+                # Also affects equipment reference inside Device instances
+                equip.criticality = equip.criticality / self.maximum_criticality
         return self.build_network(components)
     
     def set_entrypoints(self, possible_entrypoints:int|None=None):
@@ -436,7 +480,7 @@ class CommNetwork(object):
         return attrs
 
     @staticmethod
-    def attach_cyber_characteristics(component:CyberDevice, configuration:dict):
+    def attach_cyber_characteristics(component:CyberDevice, configuration:dict, effort_only:bool=False):
         """
         Add all Defences and Vulnerabilities specific in a component's configuration
         dictionary to that component.
@@ -445,11 +489,15 @@ class CommNetwork(object):
             component (CyberComponent): A component in the communication network.
             configuration (dict): Describes the characteristics of this type of
                 component.
+            effort_only (bool): Whether to only consider effort spent when 
+                determining success. If True, compromise is gauranteed if
+                enough effort is spent. Does NOT affect vulnerabilities (!). 
+                Defaults to False.
         """
         for defence in configuration.get("defences", []):
             component.add_defence(
                 Defence(name=defence.get("name", "Defence"),
-                        success_distribution=defence["success"],
+                        success_distribution=distr.bernoulli(p=1.0) if effort_only else defence["success"],
                         effort_distribution=defence["effort"])
             )
         for vulnerability in configuration.get("vulnerabilities", []):
