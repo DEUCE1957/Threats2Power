@@ -1,8 +1,11 @@
 import math
 import numpy as np
+import matplotlib as mpl
 import matplotlib.pyplot as plt
 from matplotlib.transforms import Affine2D
 from pathlib import Path
+from matplotlib.cm import ScalarMappable
+from matplotlib.colors import Normalize, LogNorm
 from communication.network import CommNetwork
 from visualization.patches import ElectricalPatchMaker, ElectricalPatchHandler
 
@@ -176,16 +179,25 @@ def add_switches(ax, grid, **kwargs):
 def color_by_comm(network, kind, connected_color="purple", compromised_color="red"):
     df = update_connected_equipment(network, kind=kind)
     df["Color"] = "black"
-    df.Color[df.Connected] = connected_color
-    df.Color[df.Compromised] = compromised_color
+    df.loc[df.Connected, "Color"] = connected_color
+    df.loc[df.Compromised, "Color"] = compromised_color
     return list(df.Color)
 
+def color_by_criticality(network, kind, cmap="plasma"):
+    criticality = network.criticality[kind]
+    highest = max([np.max(array) for array in network.criticality.values() if len(array) > 0])
+    norm = Normalize(vmin=0, vmax=1)
+    sm = mpl.cm.ScalarMappable(norm=norm, cmap=mpl.colormaps[cmap])
+    colors = sm.to_rgba(criticality / highest)
+    return list(colors)
+
 def plot_physical_grid(network:CommNetwork,
-                       ax=None, show:bool=True, show_legend:bool=True,
-                       color_by=color_by_comm,
-                       size=0.2, distance=0.5, displace=True, save_name:str=None, 
+                       ax=None, show:bool=True, show_legend:bool=True, show_colorbar:bool=False,
+                       color_by="color_by_comm",
+                       size=0.2, distance=0.5, displace=True, save_name:str=None,
                        ext_grid_rotation=np.pi/2, gen_rotation=np.pi/2, load_rotation=-np.pi/2, figsize=None):
     grid = network.grid
+    color_by = {"color_by_comm":color_by_comm, "color_by_criticality":color_by_criticality}.get(color_by, "color_by_comm")
 
     if ax is None:
         _, ax = plt.subplots(nrows=1, ncols=1, figsize=figsize)
@@ -234,9 +246,14 @@ def plot_physical_grid(network:CommNetwork,
     nrows = 1 + (len(labels) // 3)
     if show_legend:
         ax.legend(labels=labels, handles=handles, loc="lower center",
-                bbox_to_anchor=(0.5, -0.04*nrows), ncol=min(len(labels), 3), 
+                bbox_to_anchor=(0.5, -0.04*nrows), ncol=min(len(labels), 3),
                 handler_map={patch_maker:ElectricalPatchHandler() for patch_maker in handles},
                 title="Legend", fancybox=True, fontsize='large', title_fontsize='larger')
+    if show_colorbar and color_by == color_by_criticality:
+        lowest = min([np.min(array) for array in network.criticality.values() if len(array) > 0 and np.min(array) > 0])
+        highest = max([np.max(array) for array in network.criticality.values() if len(array) > 0])
+        norm = Normalize(vmin=0, vmax=1)
+        plt.gcf().colorbar(ScalarMappable(norm=norm, cmap=mpl.colormaps["jet"]), ax=ax, label="Criticality")
     if save_name is not None:
         plt.gcf().savefig(Path(__file__).parent.parent / "media" / f"{save_name}.pdf", bbox_inches='tight')
     if show:
