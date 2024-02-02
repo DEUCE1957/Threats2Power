@@ -48,7 +48,8 @@ def get_all_paths(graph):
                                     reachable_nodes={}, visited_nodes={},
                                     id_to_node=id_to_node)
 
-def monte_process(process_idx, seed, n_attacks=1000, budget=52, **network_kwargs):
+def monte_process(process_idx, seed, n_attacks=1000, budget=52,
+                  vary_entrypoints=False, device_entry_only=False, **network_kwargs):
     import numpy as np
     from communication.network import CommNetwork
     from attackers.random_attacker import RandomAttacker
@@ -59,7 +60,9 @@ def monte_process(process_idx, seed, n_attacks=1000, budget=52, **network_kwargs
 
     analyzer = Analyzer(pcn)
 
-    compromised_array, effort_array, critical_array = analyzer.monte_carlo_analysis(n_attacks, budget, **network_kwargs)
+    compromised_array, effort_array, critical_array = analyzer.monte_carlo_analysis(n_attacks, budget, 
+                                                                                    vary_entrypoints=vary_entrypoints,
+                                                                                    **network_kwargs)
     return process_idx, compromised_array, effort_array, critical_array
 
 class Analyzer():
@@ -117,14 +120,21 @@ class Analyzer():
             device_only (bool): Whether to only count compromised devices (leaf nodes) in the total tally.
                 Defaults to True.
         """
+        # Set Entrypoints
+        original_entrypoints = [n.id for n in self.network.entrypoints]
+        if vary_entrypoints: # 1 entrypoint per device
+            entrypoints = [n for n in self.network.node_ids if isinstance(self.network.id_to_node[n], Device)]
+        else:
+            entrypoints = original_entrypoints
+
         # Either use all components as an entrypoint, or the existing entrypoints
-        n_entrypoints = self.network.n_components if vary_entrypoints else self.network.n_entrypoints
+        n_entrypoints = len(entrypoints)
         self.res_monte["compromised"] = np.zeros(shape=(n_attacks, n_entrypoints), dtype=np.int16)
         self.res_monte["effort"] = np.zeros(shape=(n_attacks, n_entrypoints), dtype=np.float32)
         self.res_monte["criticality"] = np.zeros(shape=(n_attacks, n_entrypoints), dtype=np.float32)
+
         self.res_monte.update(dict(attacker_variant=attacker_variant, budget=budget, n_attacks=n_attacks, n_entrypoints=n_entrypoints))
-        original_entrypoints = [n.id for n in self.network.entrypoints]
-        entrypoints = self.network.node_ids if vary_entrypoints else original_entrypoints
+
         for i, entrypoint_id in tqdm(enumerate(entrypoints), desc="Entrypoint "): 
             # Consider attacks eminating from specific entrypoint
             self.network.set_entrypoints(entrypoint_id)
@@ -135,7 +145,7 @@ class Analyzer():
                 critical_sum, device_count = 0, 0
                 for n in nodes_compromised:
                     if isinstance(n, Device):
-                        critical_sum += n.equipment.criticality
+                        critical_sum += n.equipment.criticality if n.equipment is not None else 0
                         device_count += 1
                 self.res_monte["compromised"][attack_no, i] = device_count if device_only else len(nodes_compromised)
                 self.res_monte["effort"][attack_no, i] = total_effort_spent
@@ -161,7 +171,10 @@ class Analyzer():
 
         n_samples = kwargs.get("n_attacks", 1000) if param_name != "n_attacks" else max(param_values)
         n_processes = len(param_values) if param_name != "n_attacks" else 1
-        n_entrypoints = kwargs.get("n_entrypoints", 1)
+        vary_entrypoints = kwargs.get("vary_entrypoints", False)
+        n_entrypoints = self.network.n_devices if vary_entrypoints else kwargs.get("n_entrypoints", 1) 
+        print(n_entrypoints)
+
         self.res_monte["compromised"] = np.zeros(shape=(n_samples, n_entrypoints, n_processes), dtype=np.int16)
         self.res_monte["effort"] = np.zeros(shape=(n_samples, n_entrypoints, n_processes), dtype=np.float32)
         self.res_monte["criticality"] = np.zeros(shape=(n_samples, n_entrypoints, n_processes), dtype=np.float32)
@@ -187,7 +200,7 @@ class Analyzer():
     def plot_monte(self):
         if self.res_monte != {}:
             # Single Monte Carlo Process
-            if self.res_monte["compromised"].ndim == 1:
+            if self.res_monte["compromised"].ndim == 2:
                 fig, axes = plt.subplots(nrows=2, ncols=1, figsize=(8,6))
                 fig.suptitle(f"Attacker: {self.res_monte['attacker_variant'].__name__}, Budget: {self.res_monte['budget']}\n" + 
                                f"Network Size: {self.network.n_components}, No. of Devices: {self.network.n_devices}, " + 
@@ -200,12 +213,11 @@ class Analyzer():
                 plt.tight_layout()
                 plt.show()
             # Multiple Monte Carlo Processes
-            else:
+            else: # (N_ATTACKS, N_ENTRYPOINTS, N_PARAMS)
+                fig, ax = plt.subplots(nrows=1, ncols=1, figsize=(8,6))
                 df = pd.DataFrame(self.res_monte["compromised"], columns=self.res_monte["param_values"])
                 df = df.melt(var_name=self.res_monte["param_name"])
 
-                # display(df)
-                fig, ax = plt.subplots(nrows=1, ncols=1, figsize=(8,6))
                 sns.histplot(df, x="value", hue=self.res_monte["param_name"], discrete=True, stat="probability", common_norm=False, ax=ax)
                 sns.move_legend(ax, "upper right", ncols=4, title=self.res_monte["param_name"])
                 ax.set(xlabel="No. of Devices Compromised")

@@ -83,7 +83,7 @@ class CommNetwork(object):
         self.equip_to_device = {}
         
         # Communication Network
-        self.n_devices = n_devices
+        self.n_devices = 0
         self.n_components = 0
         # Procedural parameters
         self.sibling_to_sibling_comm = sibling_to_sibling_comm
@@ -228,6 +228,7 @@ class CommNetwork(object):
                 no_of_devices = len(devices)
 
         # Create Devices
+        self.n_devices = len(devices)
         for i, cat_name, n_splits, equip in devices:
             cat = cat_lookup[cat_name]
             device_name = cat.get("name", "Device")
