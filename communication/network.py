@@ -83,7 +83,7 @@ class CommNetwork(object):
         self.equip_to_device = {}
         
         # Communication Network
-        self.n_devices = 0
+        self.n_devices = n_devices
         self.n_components = 0
         # Procedural parameters
         self.sibling_to_sibling_comm = sibling_to_sibling_comm

@@ -123,7 +123,7 @@ class Analyzer():
         # Set Entrypoints
         original_entrypoints = [n.id for n in self.network.entrypoints]
         if vary_entrypoints: # 1 entrypoint per device
-            entrypoints = [n for n in self.network.node_ids if isinstance(self.network.id_to_node[n], Device)]
+            entrypoints = [n for n in self.network.node_ids if (isinstance(self.network.id_to_node[n], Device) if device_only else True)]
         else:
             entrypoints = original_entrypoints
 

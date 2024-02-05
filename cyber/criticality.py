@@ -3,6 +3,7 @@ import numpy as np
 import pandas as pd
 import pandapower
 import networkx as nx
+from collections import defaultdict
 
 
 def criticality_by_degree(grid:pandapower.pandapowerNet, degree=nx.degree, verbose:bool=False):
@@ -23,10 +24,18 @@ def criticality_by_degree(grid:pandapower.pandapowerNet, degree=nx.degree, verbo
         float: Highest criticality value encountered
     """
     criticality = {}
-    G = pandapower.topology.create_nxgraph(grid, include_out_of_service=True, include_lines=True, respect_switches=True,
-                                       include_impedances=False, include_dclines=True, include_trafos=True, include_trafo3ws=True)
-    bus_to_degree = degree(G)
-    degree = np.array([value for _, value in sorted(bus_to_degree, key=lambda x:x[0])])
+    bus_to_connection = defaultdict(list)
+    for line_idx, (from_bus, to_bus) in grid.line.loc[:, ["from_bus", "to_bus"]].iterrows():
+        bus_to_connection[from_bus].append(f"line_{line_idx}")
+        bus_to_connection[to_bus].append(f"line_{line_idx}")
+    for dcline_idx, (from_bus, to_bus) in grid.dcline.loc[:, ["from_bus", "to_bus"]].iterrows():
+        bus_to_connection[from_bus].append(f"dcline_{dcline_idx}")
+        bus_to_connection[to_bus].append(f"dcline_{dcline_idx}")
+    for trafo_idx, (from_bus, to_bus) in grid.trafo.loc[:, ["hv_bus", "lv_bus"]].iterrows():
+        bus_to_connection[from_bus].append(f"trafo_{trafo_idx}")
+        bus_to_connection[to_bus].append(f"trafo_{trafo_idx}")
+    bus_to_degree = {bus_no:len(lines) for bus_no, lines in bus_to_connection.items()}
+    degree = np.array([value for _, value in sorted(bus_to_degree.items(), key=lambda x:x[0])])
     lowest, highest = math.inf, -math.inf
     for kind in pandapower.pp_elements():
         df = getattr(grid, kind)
