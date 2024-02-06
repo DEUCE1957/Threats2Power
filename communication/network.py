@@ -91,7 +91,7 @@ class CommNetwork(object):
         self.child_no_deviation = child_no_deviation
         # Lookup Utilities
         self.node_ids = []
-        self.id_to_node = {} # Does not include root
+        self.id_to_node = {} # Does include root
         self.equipment = []
 
         # Generate Communication Network (Procedurally)
@@ -353,6 +353,8 @@ class CommNetwork(object):
                 prev_component = components[i - 1]
                 if prev_component.__class__ == component.__class__:
                     CommNetwork.connect_by_edges(prev_component, component)
+        self.node_ids.append(root.id)
+        self.id_to_node[root.id] = root
         self.n_components += 1
         return root
         
@@ -399,8 +401,6 @@ class CommNetwork(object):
             component = self.id_to_node[accessible_id]
             component.is_accessible = True
             self.entrypoints.append(component)
-        
-        # self.walk_and_set_entrypoints(self.root, ids_to_match=accessible_components)
     
     def build_graph(self, root:Aggregator, graph:nx.DiGraph):
         """
