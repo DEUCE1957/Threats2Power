@@ -73,6 +73,7 @@ class RandomAttacker(Attacker):
 
         Returns:
             set[Node]: Unique set of communication network components that have been compromised.
+            float: Remaining budget
         """
         if self.verbose:
             print(f"--> {current_node.id}", end=" ")
@@ -82,6 +83,8 @@ class RandomAttacker(Attacker):
             is_successful, time_spent = True, 0
         else:
             is_successful, time_spent = current_node.attack(time_available)
+        if self.verbose:
+            print(f"--> {current_node.id}" + ("S" if is_successful else "F"), end=" ")
         # Lose time spent trying to break this node
         time_available -= time_spent
         if is_successful:
@@ -100,8 +103,11 @@ class RandomAttacker(Attacker):
                                                    nodes_compromised=nodes_compromised,
                                                    max_can_compromise=max_can_compromise)
                 nodes_compromised.update(additional_nodes_compromised)
-            elif self.verbose: print("--> " + ("Dead End" if current_node.is_compromised else "Failed Attack"))
-        elif self.verbose: print("--> Ran out of Time")
+            elif self.verbose:
+                print("--> " + ("Dead End" if current_node.is_compromised else "Failed Attack") + f" ({len(nodes_compromised)} Compromised)")
+        elif self.verbose:
+            print("--> Fully Compromised" if time_available > 0  else "--> Ran out of Time")
+    
     
         # If we've compromised all nodes, or have run out of time, stop.
         return nodes_compromised, time_available

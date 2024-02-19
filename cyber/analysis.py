@@ -1,10 +1,13 @@
 import copy
+import math
 import numpy as np
 import pandas as pd
 from fractions import Fraction
 import multiprocess as mp
+import matplotlib as mpl
 import matplotlib.pyplot as plt
 import seaborn as sns
+from pathlib import Path
 from tqdm import tqdm
 from communication.components import Device
 from communication.network import CommNetwork
@@ -170,57 +173,106 @@ class Analyzer():
         np.random.seed(seed)
 
         n_samples = kwargs.get("n_attacks", 1000) if param_name != "n_attacks" else max(param_values)
-        n_processes = len(param_values) if param_name != "n_attacks" else 1
+        n_jobs = len(param_values) if param_name != "n_attacks" else 1
+        n_processes = min(mp.cpu_count() - 2, n_jobs)
+        
         vary_entrypoints = kwargs.get("vary_entrypoints", False)
-        n_entrypoints = self.network.n_devices if vary_entrypoints else kwargs.get("n_entrypoints", 1) 
-        print(n_entrypoints)
+        n_entrypoints = self.network.n_devices if vary_entrypoints else kwargs.get("n_entrypoints", 1)
 
-        self.res_monte["compromised"] = np.zeros(shape=(n_samples, n_entrypoints, n_processes), dtype=np.int16)
-        self.res_monte["effort"] = np.zeros(shape=(n_samples, n_entrypoints, n_processes), dtype=np.float32)
-        self.res_monte["criticality"] = np.zeros(shape=(n_samples, n_entrypoints, n_processes), dtype=np.float32)
+        self.res_monte["compromised"] = np.zeros(shape=(n_samples, n_entrypoints, n_jobs), dtype=np.int16)
+        self.res_monte["effort"] = np.zeros(shape=(n_samples, n_entrypoints, n_jobs), dtype=np.float32)
+        self.res_monte["criticality"] = np.zeros(shape=(n_samples, n_entrypoints, n_jobs), dtype=np.float32)
         self.res_monte.update(dict(param_name=param_name, param_values=param_values))
-        print(f"CPU Thread Count: {mp.cpu_count()-2}")
+        print(f"CPU Count: {n_processes}, Jobs: {n_jobs}")
 
-        with mp.Pool(processes=len(param_values)) as pool:
+        with mp.Pool(processes=n_processes) as pool, tqdm(total=n_jobs) as pbar:
             results = []
             for i, value in enumerate(param_values):
                 print(f"{param_name.replace('_',' ').capitalize()}: {value}")
                 kwds = {**{param_name:value}, **kwargs}
                 results.append(
-                    pool.apply_async(monte_process, args=[i, seed], kwds=kwds)
+                    pool.apply_async(monte_process, args=[i, seed], callback=lambda _:pbar.update(1), kwds=kwds)
                 )
-            
             for result in results:
-                process_idx, compromises, efforts, criticality = result.get()
-                self.res_monte["compromised"][:, :, process_idx] = compromises
-                self.res_monte["effort"][:, :, process_idx] = efforts
-                self.res_monte["criticality"][:, :, process_idx] = criticality
+                job_idx, compromises, efforts, criticality = result.get()
+                self.res_monte["compromised"][:, :, job_idx] = compromises
+                self.res_monte["effort"][:, :, job_idx] = efforts
+                self.res_monte["criticality"][:, :, job_idx] = criticality
         return self.res_monte["compromised"], self.res_monte["effort"], self.res_monte["criticality"]
-    
-    def plot_monte(self):
+
+    def plot_monte(self, info:bool=False, palette:str="Dark2", save_name="Monte", figsize=(14,12), flatten:bool=False):
+        sns.set_context('paper', font_scale=2.0)
         if self.res_monte != {}:
-            # Single Monte Carlo Process
-            if self.res_monte["compromised"].ndim == 2:
-                fig, axes = plt.subplots(nrows=2, ncols=1, figsize=(8,6))
-                fig.suptitle(f"Attacker: {self.res_monte['attacker_variant'].__name__}, Budget: {self.res_monte['budget']}\n" + 
-                               f"Network Size: {self.network.n_components}, No. of Devices: {self.network.n_devices}, " + 
-                               f"No. of Entrypoints: {self.network.n_entrypoints}", 
-                            y=-0.05, fontsize="medium", ma="center")
-                sns.histplot(self.res_monte["compromised"], discrete=True, stat="probability", ax=axes[0])
-                axes[0].set(xticks=np.arange(0, len(self.network.graph.nodes())), xlabel="No. of Devices Compromised")
-                sns.histplot(self.res_monte["effort"], binwidth=1, ax=axes[1])
-                axes[1].set(xlabel="Effort Spent")
-                plt.tight_layout()
-                plt.show()
             # Multiple Monte Carlo Processes
-            else: # (N_ATTACKS, N_ENTRYPOINTS, N_PARAMS)
-                fig, ax = plt.subplots(nrows=1, ncols=1, figsize=(8,6))
+            if "param_values" in self.res_monte:
+                # Reshape to collapse all entrypoint variations into the first dimension
+                n_attacks, n_entrypoints, n_params = self.res_monte["compromised"].shape
+                self.res_monte["compromised"] = np.reshape(self.res_monte["compromised"], (n_attacks*n_entrypoints, n_params))
+                # Create Pandas Dataframe (to name attributes)
                 df = pd.DataFrame(self.res_monte["compromised"], columns=self.res_monte["param_values"])
                 df = df.melt(var_name=self.res_monte["param_name"])
 
+                fig, ax = plt.subplots(nrows=1, ncols=1, figsize=figsize)
+                sns.set_context(font_scale=2.0)
                 sns.histplot(df, x="value", hue=self.res_monte["param_name"], discrete=True, stat="probability", common_norm=False, ax=ax)
-                sns.move_legend(ax, "upper right", ncols=4, title=self.res_monte["param_name"])
-                ax.set(xlabel="No. of Devices Compromised")
+                sns.move_legend(ax, "upper right", ncols=4, title=" ".join([word.capitalize() for word in self.res_monte["param_name"].split("_")]))
+                ax.set(xlabel="No. of Devices Compromised", yscale="log")
+                fig.savefig(Path(__file__).parent.parent / "media" / f"{save_name}.pdf")
+                plt.show()
+            # Single Monte Carlo Process
+            else:
+                if info:
+                    print(f"Attacker: {self.res_monte['attacker_variant'].__name__}, Budget: {self.res_monte['budget']}\n" + 
+                          f"Network Size: {self.network.n_components}, No. of Devices: {self.network.n_devices}, " + 
+                          f"No. of Entrypoints: {self.network.n_entrypoints}")
+                
+                # Combine all entrypoints if Flatten is True
+                compromised = self.res_monte["compromised"].flatten() if flatten else self.res_monte["compromised"]
+                effort = self.res_monte["effort"].flatten() if flatten else self.res_monte["effort"]
+                criticality = self.res_monte["criticality"].flatten() if flatten else self.res_monte["criticality"]
+
+                has_varied_entrypoints = False if flatten else (True if compromised.shape[1] > 1 else False)
+                has_criticality = True if not math.isclose(criticality.mean(), 0) else False
+
+                fig = plt.figure(figsize=figsize)
+                gs = mpl.gridspec.GridSpec(nrows=3 if has_criticality else 2, ncols=2, figure=fig, width_ratios=(0.95, 0.05))
+
+                N = 1 if flatten else compromised.shape[1]
+                palette = sns.color_palette(palette=palette, n_colors=N, as_cmap=False)
+                cmap = mpl.colors.ListedColormap(palette)
+
+                # Compromise Distribution
+                ax = fig.add_subplot(gs[0, 0] if has_varied_entrypoints else gs[0, :])
+                sns.histplot(compromised, discrete=True, stat="probability", common_norm=False, palette=palette, ax=ax)
+                ax.set(xlabel="No. of Components Compromised", xlim=(-0.5, np.max(compromised)+0.5),
+                            )
+                legend = ax.get_legend()
+                if legend is not None:
+                    legend.remove()
+
+                # Effort Distribution
+                ax = fig.add_subplot(gs[1, 0] if has_varied_entrypoints else gs[1, :])
+                sns.histplot(effort, binwidth=1, stat="percent", palette=palette, ax=ax)
+                ax.set(xlabel="Effort Spent", xlim=(0, np.max(effort)))
+                
+                # Criticality Distribution
+                if has_criticality:
+                    ax = fig.add_subplot(gs[2, 0] if has_varied_entrypoints else gs[2, :])
+                    sns.histplot(criticality, binwidth=0.1, binrange=(0, self.network.maximum_criticality), stat="probability", label="Bin Width: 0.1", zorder=0, ax=ax)
+                    sns.histplot(criticality, binwidth=1.0, binrange=(0, self.network.maximum_criticality), stat="probability", label="Bin Width: 1.0", zorder=-1, ax=ax)
+                    sns.histplot(criticality, binwidth=5.0, binrange=(0, self.network.maximum_criticality), stat="probability", label="Bin Width: 5.0", zorder=-2, ax=ax)
+                    ax.vlines(x=[np.mean(criticality)], ymin=0, ymax=ax.get_ylim()[1], label="Mean", zorder=1,
+                                color="red", linestyles="--", linewidth=3)
+                    ax.legend()
+                    ax.set(xlabel="Criticality", yscale="log")
+                    plt.show()
+
+                if has_varied_entrypoints:
+                    norm = mpl.colors.BoundaryNorm(np.linspace(0, N, N+1), cmap.N)
+                    sm = mpl.cm.ScalarMappable(cmap=cmap, norm=norm)
+                    fig.colorbar(sm, cax=fig.add_subplot(gs[:, 1]), label="Entrypoint",
+                                    ticks=np.arange(1, N+1))
+                plt.tight_layout()
                 plt.show()
     
     def plot_static(self):
