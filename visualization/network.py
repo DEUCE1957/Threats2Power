@@ -154,12 +154,15 @@ def plot_communication_network(network:CommNetwork, attacker:Attacker=None, pale
     labels, handles = zip(*sorted(zip(*(legend_map.keys(), legend_map.values())), key=lambda t: t[0]))
 
     # Hierarchical / Tree Visualization of Communication Network
-    tree_pos = layout(nx.to_undirected(network.graph), network.root, invert=invert)
-    nx.draw_networkx_nodes(network.graph, pos=tree_pos, ax=ax,
+    if layout == hierarchy_layout:
+        pos = layout(nx.to_undirected(network.graph), network.root, invert=invert)
+    else:
+        pos = layout(nx.to_undirected(network.graph))
+    nx.draw_networkx_nodes(network.graph, pos=pos, ax=ax,
                            node_size=400, node_shape="s", node_color=node_color_mask,
                            linewidths=1.0, edgecolors=node_edge_color_mask)
-    nx.draw_networkx_labels(network.graph, pos=tree_pos, labels=label_map, ax=ax, font_size=10)
-    nx.draw_networkx_edges(network.graph, pos=tree_pos, ax=ax, edge_color=edge_color_mask)
+    nx.draw_networkx_labels(network.graph, pos=pos, labels=label_map, ax=ax, font_size=10)
+    nx.draw_networkx_edges(network.graph, pos=pos, ax=ax, edge_color=edge_color_mask)
     
     if show_legend:
         ax.legend(labels=labels, handles=handles, loc="lower center", bbox_to_anchor=(0.5, -0.1), ncol=len(labels),
@@ -170,4 +173,4 @@ def plot_communication_network(network:CommNetwork, attacker:Attacker=None, pale
         plt.gcf().savefig(Path(__file__).parent.parent / "media" / f"{save_name}.png", bbox_inches='tight')
     if show:
         plt.show()
-    return handles, labels, tree_pos
+    return handles, labels, pos

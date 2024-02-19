@@ -30,7 +30,7 @@ class CommNetwork(object):
                  criticality:dict[str:np.ndarray]=None,
                  crit_norm:bool=False,
                  effort_only:bool=False,
-                 sibling_to_sibling_comm:[None, "adjacent", "all"]=None,
+                 sibling_to_sibling_comm:[False, "adjacent", "all"]=False,
                  n_entrypoints:int=1):
         """
         The topology of the communication network is procedurally generated based on the
