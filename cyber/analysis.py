@@ -15,7 +15,7 @@ from attackers.interface import Attacker
 from attackers.random_attacker import RandomAttacker
 
 
-def iterate_over_paths(path, prob, reachable_nodes={}, visited_nodes={}, id_to_node={}):
+def iterate_over_paths(path, prob, success_count, reachable_nodes={}, visited_nodes={}, id_to_node={}):
     current_id = path[-1]
     current_node = id_to_node[current_id]
     visited_previously = current_id in visited_nodes
@@ -23,23 +23,32 @@ def iterate_over_paths(path, prob, reachable_nodes={}, visited_nodes={}, id_to_n
         visited_nodes[current_id] = None
     
     neighbouring_nodes = {k.id:None for k in current_node.get_neighbours()}
+    failed_reach = copy.copy(reachable_nodes)
+    failed_reach = {k:None for k in failed_reach if k not in visited_nodes}
+
     reachable_nodes.update(neighbouring_nodes)
     reachable_nodes = {k:None for k in reachable_nodes if k not in visited_nodes}
+    
     success_prob = current_node.get_prob_to_compromise()
-    # If we fail, this path terminates
-    yield path, prob*(1-success_prob), True
     if visited_previously:
         return
     n_reachable = len(reachable_nodes)
-    reachable_ids =  list(reachable_nodes.keys())
-    for reachable_node_id in reachable_ids:
-        yield from iterate_over_paths(path+[reachable_node_id], prob*success_prob*(1/n_reachable),
+    # Success
+    for reachable_node_id in  list(reachable_nodes.keys()):
+        yield from iterate_over_paths(path+[reachable_node_id], prob*success_prob*(1/n_reachable), success_count + 1,
                                     copy.copy(reachable_nodes), copy.copy(visited_nodes),
                                     id_to_node=id_to_node)
-        
-    # No more nodes reachable (entire network compromised)
     if len(reachable_nodes) == 0:
-        yield path, prob*success_prob, False
+        yield path, prob*success_prob, False, success_count + 1
+
+    # Failure
+    n_reachable = len(failed_reach)
+    for reachable_node_id in list(failed_reach.keys()):
+        yield from iterate_over_paths(path+[reachable_node_id], prob*(1-success_prob)*(1/n_reachable), success_count,
+                                    failed_reach, copy.copy(visited_nodes),
+                                    id_to_node=id_to_node)
+    if len(failed_reach) == 0:
+        yield path, prob*(1-success_prob), True, success_count
 
 def get_all_paths(graph):
     n_nodes = len(graph.nodes())
@@ -47,7 +56,7 @@ def get_all_paths(graph):
     start_ids = list(id_to_node.keys())
     # Different starting locations
     for start_node_id in start_ids:
-        yield from iterate_over_paths([start_node_id], prob=1/n_nodes,
+        yield from iterate_over_paths([start_node_id], prob=1/n_nodes, success_count=0,
                                     reachable_nodes={}, visited_nodes={},
                                     id_to_node=id_to_node)
 
@@ -92,20 +101,19 @@ class Analyzer():
             show_paths (bool): Whether to print out each path (can be very long for larger networks)
         """
         sum_probs = 0.0
-        self.res_static = {}
-        for path_no, (path, prob, ends_on_failure) in tqdm(enumerate(get_all_paths(self.network.graph)), desc="Path ", leave=False):
+        res_static = {i:0 for i in range(self.network.n_components+1)}
+        for path_no, (path, prob, ends_on_failure, success_count) in tqdm(enumerate(get_all_paths(self.network.graph)), desc="Path ", leave=False):
+            # path_length = len(path) - 1 if ends_on_failure else len(path)
             if show_paths:
                 print(f"Path {path_no} :: Prob {str(Fraction(prob).limit_denominator()):<15}" + 
-                        f" :: {'-'.join([str(node) for node in path])} :: {ends_on_failure}")
-            # if (len(path) > 1 and ends_on_failure) or (not ends_on_failure):
-            path_length = len(path) - 1 if ends_on_failure else len(path)
-            self.res_static[path_length] = prob if path_length not in self.res_static else self.res_static[path_length] + prob
+                        f" :: {'-'.join([str(node) for node in path])} :: {'F' if ends_on_failure else 'S'} :: {success_count}")
+            res_static[success_count] += prob
             sum_probs += prob
         if verbose:
             print(f"No. of Paths: {path_no}. Sum of Probabilities: {sum_probs} ({Fraction(sum_probs).limit_denominator()})")
         if verbose:
-            print("\n".join(f"{k} devices: {v}" for k,v in sorted(self.res_static.items(),key=lambda item: item[0])))
-        return self.res_static
+            print("\n".join(f"{k} devices: {v}" for k,v in sorted(res_static.items(),key=lambda item: item[0])))
+        return res_static
     
     def monte_carlo_analysis(self, n_attacks:int, budget:float, attacker_variant:Attacker=RandomAttacker,
                              device_only:bool=True, vary_entrypoints:bool=False, **kwargs):

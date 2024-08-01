@@ -127,7 +127,7 @@ class CommNetwork(object):
         uniform_device_types = [1/len(categories)]*len(categories)
         device_type_prob = self.specs["device"].get("proportion", uniform_device_types) if prop is None else prop
         # Device Type is based on statistic / expected proportion
-        if self.grid is None: 
+        if self.grid is None:
             device_population = np.random.choice(categories, p=device_type_prob, replace=True, size=self.n_devices)
             devices = [(i, cat_name, 1, None) for i, cat_name in enumerate(device_population)]
         # Apply rules in Specifications to assign 1 or more devices to equipment in the grid.
@@ -160,7 +160,7 @@ class CommNetwork(object):
                         )
                     # Filter out equipment that doesn't meet conditions
                     if "filter" in actions:
-                        conditions = actions["filter"] # Can filter my multiple conditions
+                        conditions = actions["filter"] # Can filter by multiple conditions
                         mask = np.ones(equip_df.shape[0], dtype=bool)
                         for condition in conditions:
                             criteria = equip_df.get(condition["attribute"]) if condition["attribute"] != "voltage" else volt_lookup[device_kind]
@@ -205,7 +205,7 @@ class CommNetwork(object):
                     category = equip_df.Category.loc[row.name].item()
                     n_splits = row[category]
                     return n_splits
-                select_no_of_splits = lambda row: row[equip_df.Category.loc[row.name].item()]
+                
                 equip_df["Splits"] = compatability["splits"].loc[mask].apply(select_no_of_splits, axis=1)
 
                 # Add Device Idx, Device Category, No. of Splits and Associated Equipment to devices
@@ -223,8 +223,9 @@ class CommNetwork(object):
                                           criticality=criticality)
                         self.maximum_criticality += criticality
                     devices.append((i, cat_name, n_splits, equip))
-                devices.extend([(no_of_devices + count, equip_df.loc[idx, "Category"], equip_df.loc[idx, "Splits"],
-                                 equip) for count, idx in enumerate(equip_df.index)])
+                # Add additional devices corresponding to n_splits
+                # devices.extend([(no_of_devices + count, equip_df.loc[idx, "Category"], equip_df.loc[idx, "Splits"],
+                #                  equip) for count, idx in enumerate(equip_df.index)])
                 no_of_devices = len(devices)
 
         # Create Devices
