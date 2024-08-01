@@ -3,7 +3,7 @@ from abc import abstractmethod
 
 class Attacker():
     
-    def __init__(self, budget:float, verbose:bool=False):
+    def __init__(self, budget:float, verbose:bool=False, auto_compromise_children:bool=False):
         """
         Args:
             budget (float): Time available to compromise nodes, starting at the entry point.
@@ -12,6 +12,7 @@ class Attacker():
         """
         self.budget = budget
         self.verbose = verbose
+        self.auto_compromise_children = auto_compromise_children
     
     @abstractmethod
     def attack_network(self, comm_network:CommNetwork) -> None:

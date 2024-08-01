@@ -61,7 +61,7 @@ def get_all_paths(graph):
                                     id_to_node=id_to_node)
 
 def monte_process(process_idx, seed, n_attacks=1000, budget=52,
-                  vary_entrypoints=False, device_entry_only=False, **network_kwargs):
+                  vary_entrypoints=False, device_entry_only=False, auto_compromise_children:bool=False, **network_kwargs):
     import numpy as np
     from communication.network import CommNetwork
     from attackers.random_attacker import RandomAttacker
@@ -74,6 +74,7 @@ def monte_process(process_idx, seed, n_attacks=1000, budget=52,
 
     compromised_array, effort_array, critical_array = analyzer.monte_carlo_analysis(n_attacks, budget, 
                                                                                     vary_entrypoints=vary_entrypoints,
+                                                                                    auto_compromise_children=auto_compromise_children,
                                                                                     **network_kwargs)
     return process_idx, compromised_array, effort_array, critical_array
 
@@ -116,7 +117,7 @@ class Analyzer():
         return res_static
     
     def monte_carlo_analysis(self, n_attacks:int, budget:float, attacker_variant:Attacker=RandomAttacker,
-                             device_only:bool=True, vary_entrypoints:bool=False, **kwargs):
+                             device_only:bool=True, vary_entrypoints:bool=False, auto_compromise_children:bool=False, **kwargs):
         """
         Approximate the true probability of compromising N devices by running many randomly
         varying attacks on the same communication network. The approximation becomes more
@@ -144,13 +145,14 @@ class Analyzer():
         self.res_monte["effort"] = np.zeros(shape=(n_attacks, n_entrypoints), dtype=np.float32)
         self.res_monte["criticality"] = np.zeros(shape=(n_attacks, n_entrypoints), dtype=np.float32)
 
-        self.res_monte.update(dict(attacker_variant=attacker_variant, budget=budget, n_attacks=n_attacks, n_entrypoints=n_entrypoints))
+        self.res_monte.update(dict(attacker_variant=attacker_variant, budget=budget, n_attacks=n_attacks,
+                                   n_entrypoints=n_entrypoints, auto_compromise_children=auto_compromise_children))
 
         for i, entrypoint_id in tqdm(enumerate(entrypoints), desc="Entrypoint "): 
             # Consider attacks eminating from specific entrypoint
             self.network.set_entrypoints(entrypoint_id)
             for attack_no in tqdm(range(n_attacks), desc="Attack "):
-                attacker = attacker_variant(budget=budget, verbose=False)
+                attacker = attacker_variant(budget=budget, auto_compromise_children=auto_compromise_children, verbose=False)
                 nodes_compromised, total_effort_spent = attacker.attack_network(self.network)
                 # Count how many nodes were compromised (and add up their criticality)
                 critical_sum, device_count = 0, 0

@@ -90,6 +90,8 @@ class RandomAttacker(Attacker):
         if is_successful:
             nodes_available.update(current_node.get_neighbours())
             nodes_compromised.add(current_node)
+            if self.auto_compromise_children:
+                nodes_compromised = self.compromise_children(current_node, nodes_compromised=nodes_compromised)
         nodes_available.difference_update(nodes_visited)
         # Still have time available, and haven't compromised entire network yet
         if time_available > 0 and len(nodes_compromised) < max_can_compromise:
