@@ -114,6 +114,7 @@ def criticality_by_power_flow(grid:pandapower.pandapowerNet, verbose:bool=False)
         criticality[attr] = apparent_power
     return criticality, lowest, highest
 
+
 def criticality_by_capacity(grid, verbose:bool=False):
     """
     Determines the criticality of each component based on the maximum theoretical apparent 
@@ -148,16 +149,20 @@ def criticality_by_capacity(grid, verbose:bool=False):
         elif attr == "dcline":
             max_q_mvar = np.max(np.vstack([df.max_q_from_mvar, df.max_q_to_mvar]),axis=0)
             Sn_mva = np.sqrt(np.power(df.max_p_mw,2) * np.power(max_q_mvar,2))
+        elif attr == "switch":
+            Sn_mva = (np.power(df.in_ka, 2)*df.z_ohm)/1000.0 # S = |I|^2Z
         elif attr == "bus":
             for other_attr in pandapower.pp_elements():
                 other_df = getattr(grid, other_attr).copy()
+                # display(other_df.head())
                 if hasattr(other_df, "bus"):
                     # Inherit apparent power of connected elements (not lines!)
                     other_df["apparent"] = get_apparent_power(grid, other_attr)
                     # Sn_mva[other_df.bus] += other_df["apparent"]
                     for _, row in other_df.iterrows():
                         if row.bus in df.index:
-                            Sn_mva[row.bus] += row.apparent
+                            bus_idx = df.index.get_loc(row.bus)
+                            Sn_mva[bus_idx] += row.apparent
         return Sn_mva
     
     for attr in pandapower.pp_elements():
@@ -167,5 +172,6 @@ def criticality_by_capacity(grid, verbose:bool=False):
         lowest = low if low < lowest else lowest
         highest = high if high > highest else highest
         criticality[attr] = Sn_mva
+        if verbose: print(f"'{attr}': {lowest}-{highest}")
     
     return criticality, lowest, highest
