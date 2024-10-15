@@ -117,7 +117,8 @@ class Analyzer():
         return res_static
     
     def monte_carlo_analysis(self, n_attacks:int, budget:float, attacker_variant:Attacker=RandomAttacker,
-                             device_only:bool=True, vary_entrypoints:bool=False, auto_compromise_children:bool=False, **kwargs):
+                             device_only:bool=True, vary_entrypoints:bool=False, auto_compromise_children:bool=False, 
+                             **kwargs):
         """
         Approximate the true probability of compromising N devices by running many randomly
         varying attacks on the same communication network. The approximation becomes more
@@ -211,7 +212,7 @@ class Analyzer():
         return self.res_monte["compromised"], self.res_monte["effort"], self.res_monte["criticality"]
 
     def plot_monte(self, info:bool=False, palette:str="Dark2", save_name="Monte", figsize=(14,12), 
-                   bin_widths:list[float]=[1.0, 5.0], flatten:bool=False):
+                   bin_widths:list[float]=[1.0, 5.0], flatten:bool=False, max_criticality:float=None):
         sns.set_context('paper', font_scale=2.0)
         if self.res_monte != {}:
             # Multiple Monte Carlo Processes
@@ -266,27 +267,35 @@ class Analyzer():
                 sns.histplot(effort, binwidth=1, stat="percent", ax=ax, **hue_settings)
                 ax.set(xlabel="Effort Spent", xlim=(0, np.max(effort)))
                 
+                legend = ax.get_legend()
+                if legend is not None:
+                    legend.remove()
+                
                 # Criticality Distribution
                 if has_criticality:
+                    print(f"Susceptibility Index: {np.mean(criticality)} (Max: {self.network.maximum_criticality})")
                     ax = fig.add_subplot(gs[2, 0] if has_varied_entrypoints else gs[2, :])
+                    max_criticality = self.network.maximum_criticality if max_criticality is None else max_criticality
                     for i, binwidth in enumerate(bin_widths):
-                        sns.histplot(criticality, binwidth=binwidth, binrange=(0, self.network.maximum_criticality), stat="probability",
+                        sns.histplot(criticality, binwidth=binwidth, binrange=(0, max_criticality), stat="probability",
                                      label=f"Bin Width: {binwidth:.1f}", zorder=-i, ax=ax, **hue_settings)
                     ax.vlines(x=[np.mean(criticality)], ymin=0, ymax=ax.get_ylim()[1], label="Mean", zorder=1,
                                 color="red", linestyles="--", linewidth=3)
                     ax.legend()
                     ax.set(xlabel="Criticality", yscale="log")
                     plt.show()
+                    
 
 
                 if has_varied_entrypoints:
                     norm = mpl.colors.BoundaryNorm(np.linspace(0, N, N+1), cmap.N)
                     sm = mpl.cm.ScalarMappable(cmap=cmap, norm=norm)
-                    fig.colorbar(sm, cax=fig.add_subplot(gs[:, 1]), label="Entrypoint",
+                    fig.colorbar(sm, cax=fig.asdd_subplot(gs[:, 1]), label="Entrypoint",
                                     ticks=np.arange(1, N+1))
                 plt.tight_layout()
                 fig.savefig(Path(__file__).parent.parent / "media" / f"{save_name}.pdf")
                 plt.show()
+
     
     def plot_static(self):
         if self.res_static != {}:

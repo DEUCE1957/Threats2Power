@@ -31,7 +31,7 @@ class CommNetwork(object):
                  crit_norm:bool=False,
                  effort_only:bool=False,
                  sibling_to_sibling_comm:[False, "adjacent", "all"]=False,
-                 n_entrypoints:int=1):
+                 n_entrypoints:int=1, **kwargs):
         """
         The topology of the communication network is procedurally generated based on the
         parameters set here.
