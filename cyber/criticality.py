@@ -41,11 +41,11 @@ def criticality_by_degree(grid:pandapower.pandapowerNet, degree=nx.degree, verbo
         df = getattr(grid, kind)
         if kind == "bus":
             criticality["bus"] = degree
-        elif hasattr(df, "bus"):
+        elif hasattr(df, "bus"): # Load / Generator
             criticality[kind] = getattr(df, "bus").map(bus_to_degree)
-        elif hasattr(df, "from_bus"):
+        elif hasattr(df, "from_bus"): # Line
             criticality[kind] = getattr(df, "from_bus").map(bus_to_degree).add(getattr(df, "to_bus").map(bus_to_degree))
-        elif hasattr(df, "hv_bus"):
+        elif hasattr(df, "hv_bus"): # Transformer
             criticality[kind] = getattr(df, "hv_bus").map(bus_to_degree).add(getattr(df, "lv_bus").map(bus_to_degree))
         else:
             criticality[kind] = np.zeros(df.shape[0])

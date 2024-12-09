@@ -2,6 +2,7 @@ import copy
 import math
 import numpy as np
 import pandas as pd
+import arviz as az
 from fractions import Fraction
 import multiprocess as mp
 import matplotlib as mpl
@@ -9,10 +10,18 @@ import matplotlib.pyplot as plt
 import seaborn as sns
 from pathlib import Path
 from tqdm import tqdm
+from scipy import stats
 from communication.components import Device
 from communication.network import CommNetwork
 from attackers.interface import Attacker
 from attackers.random_attacker import RandomAttacker
+
+def mean_confidence_interval(data, confidence=0.95):
+    a = 1.0 * np.array(data)
+    n = len(a)
+    m, se = np.mean(a), stats.sem(a)
+    h = se * stats.t.ppf((1 + confidence) / 2., n-1)
+    return m, m-h, m+h
 
 
 def iterate_over_paths(path, prob, success_count, reachable_nodes={}, visited_nodes={}, id_to_node={}):
@@ -210,8 +219,9 @@ class Analyzer():
                 self.res_monte["criticality"][:, :, job_idx] = criticality
         return self.res_monte["compromised"], self.res_monte["effort"], self.res_monte["criticality"]
 
-    def plot_monte(self, info:bool=False, palette:str="Dark2", save_name="Monte", figsize=(14,12), 
-                   bin_widths:list[float]=[1.0, 5.0], flatten:bool=False):
+    def plot_monte(self, info:bool=False, palette:str="Dark2", save_name="Monte",
+                   save_dir:Path=Path(__file__).parent.parent / "media",
+                   figsize=(14,12), bin_widths:list[float]=[1.0, 5.0], flatten:bool=False):
         sns.set_context('paper', font_scale=2.0)
         if self.res_monte != {}:
             # Multiple Monte Carlo Processes
@@ -228,7 +238,7 @@ class Analyzer():
                 sns.histplot(df, x="value", hue=self.res_monte["param_name"], discrete=True, stat="probability", common_norm=False, ax=ax)
                 sns.move_legend(ax, "upper right", ncols=4, title=" ".join([word.capitalize() for word in self.res_monte["param_name"].split("_")]))
                 ax.set(xlabel="No. of Devices Compromised", yscale="log")
-                fig.savefig(Path(__file__).parent.parent / "media" / f"{save_name}.pdf")
+                fig.savefig(save_dir / f"{save_name}.pdf")
                 plt.show()
             # Single Monte Carlo Process
             else:
@@ -272,12 +282,17 @@ class Analyzer():
                     for i, binwidth in enumerate(bin_widths):
                         sns.histplot(criticality, binwidth=binwidth, binrange=(0, self.network.maximum_criticality), stat="probability",
                                      label=f"Bin Width: {binwidth:.1f}", zorder=-i, ax=ax, **hue_settings)
-                    ax.vlines(x=[np.mean(criticality)], ymin=0, ymax=ax.get_ylim()[1], label="Mean", zorder=1,
+                    mean, low, high = mean_confidence_interval(criticality, confidence=0.95)
+                    ax.vlines(x=[mean], ymin=0, ymax=ax.get_ylim()[1], label="Mean", zorder=1,
                                 color="red", linestyles="--", linewidth=3)
+                    
+                    print("Mean Confidence Interval: ", low, mean, high)
+                    print("High Credibility Interval: ", az.hdi(criticality))
+                    # ax.axvspan(low, high, alpha=0.5, color='red')
+                    ax.axvspan(*az.hdi(criticality), alpha=0.5, color='red', zorder=-10)
                     ax.legend()
                     ax.set(xlabel="Criticality", yscale="log")
                     plt.show()
-
 
                 if has_varied_entrypoints:
                     norm = mpl.colors.BoundaryNorm(np.linspace(0, N, N+1), cmap.N)
@@ -285,8 +300,10 @@ class Analyzer():
                     fig.colorbar(sm, cax=fig.add_subplot(gs[:, 1]), label="Entrypoint",
                                     ticks=np.arange(1, N+1))
                 plt.tight_layout()
-                fig.savefig(Path(__file__).parent.parent / "media" / f"{save_name}.pdf")
+                fig.savefig(save_dir / f"{save_name}.pdf")
                 plt.show()
+                
+                
     
     def plot_static(self):
         if self.res_static != {}:
