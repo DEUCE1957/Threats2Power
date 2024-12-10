@@ -85,22 +85,24 @@ def run_experiment(seed:int=0, spec:str="Default", grid:str|Path="create_cigre_n
     def run_monte(event):
         print("Running New Monte Carlo Simulation (Estimated Time to Completion: 40 minutes)")
         if len(param_values) > 1:
-            compromised_array, effort_array, criticality_array = analyzer.monte_carlo_multi_analysis(seed=seed, 
-                                                                                    n_attacks=n_attacks,
-                                                                                    child_no_deviation=0,
-                                                                                    grid=grid,
-                                                                                    vary_entrypoints=kwargs.get("vary_entrypoints", True),
-                                                                                    effort_only=kwargs.get("effort_only", False),
-                                                                                    criticality=criticality,
-                                                                                    auto_compromise_children=auto_compromise_children,
-                                                                                    param_name=param_name, 
-                                                                                    param_values=param_values)
+            monte_kwargs = dict(seed=seed, n_attacks=n_attacks,
+                                child_no_deviation=kwargs.get("child_no_deviation", 0),
+                                auto_compromise_children=auto_compromise_children,
+                                grid=grid,
+                                vary_entrypoints=kwargs.get("vary_entrypoints", True),
+                                effort_only=kwargs.get("effort_only", False),
+                                criticality=criticality,
+                                param_name=param_name, param_values=param_values)
+            
+            compromised_array, effort_array, criticality_array = analyzer.monte_carlo_multi_analysis(**monte_kwargs)
         else:
-            compromised_array, effort_array, criticality_array = analyzer.monte_carlo_analysis(
-                n_attacks=n_attacks, attacker_variant=RandomAttacker, budget=kwargs.get("budget",52), device_only=False, 
-                sibling_to_sibling_comm=kwargs.get("sibling_to_sibling_comm", None), vary_entrypoints=kwargs.get("vary_entrypoints", True),
-                auto_compromise_children=auto_compromise_children,
-            )
+            monte_kwargs = dict(
+                n_attacks=n_attacks, attacker_variant=RandomAttacker,
+                budget=kwargs.get("budget",52), device_only=False, 
+                sibling_to_sibling_comm=kwargs.get("sibling_to_sibling_comm", None),
+                vary_entrypoints=kwargs.get("vary_entrypoints", True),
+                auto_compromise_children=auto_compromise_children)
+            compromised_array, effort_array, criticality_array = analyzer.monte_carlo_analysis(**monte_kwargs)
         np.savez(archive_path, compromise=compromised_array, effort=effort_array, criticality=criticality_array) # .flatten()
         analyzer.plot_monte(save_name=save_name, save_dir=out_dir,
                             figsize=((14, 16) if not math.isclose(np.mean(criticality_array), 0) else (14,12)),
@@ -109,6 +111,7 @@ def run_experiment(seed:int=0, spec:str="Default", grid:str|Path="create_cigre_n
     def load_previous(event):
         print("Loading Previous Session")
         arrays = np.load(archive_path)
+        print(arrays.keys())
         compromised_array = arrays.get("compromise")
         effort_array = arrays.get("effort")
         criticality_array = arrays.get("criticality", np.zeros_like(compromised_array))
@@ -143,7 +146,7 @@ if __name__ == "__main__":
                         help="Seed for Monte Carlo simulation")
     parser.add_argument("-N", "--N", dest="n_attacks", default=10000, nargs="?", type=int,
                         help="Number of attacks / Monte Carlo simultions")
-    parser.add_argument("--crit", dest="criticality", default=None, nargs="?", type=str,
+    parser.add_argument("--crit", "--criticality", dest="criticality", default=None, nargs="?", type=str,
                         help="One of 'capacity', 'power_flow', or 'degree'")
     parser.add_argument("--spec", default="Default", nargs="?", type=str,
                         help="Which specification file to use")
@@ -151,13 +154,13 @@ if __name__ == "__main__":
                         help="Which physical grid to load")
     parser.add_argument("-p", "--param", dest="param_name", type=str, default="budget", 
                         help="Which parameter to vary")
-    parser.add_argument("-v", "--values", dest="values", nargs="+",
+    parser.add_argument("-v", "--values", dest="param_values", nargs="+",
                         help="Values of parameter", type=float,
                         default=[52])
     parser.add_argument("--savename", "--name", dest="save_name", nargs="?",
                         help="Name of file to save to", type=str,
                         default="Susceptibility")
-    parser.add_argument("--vary", "-- vary-entrypoints", 
+    parser.add_argument("--vary", "--vary-entrypoints", 
                         dest="vary_entrypoints", type=lambda x:bool(strtobool(x)),
                         default=True, help="Whether to vary the entrypoints")
     parser.add_argument("--flatten", 
@@ -169,7 +172,7 @@ if __name__ == "__main__":
     parser.add_argument("--sib", "--sibling-to-sibling-comm", dest="sibling_to_sibling_comm", 
                         default="all", nargs="?", type=str,
                         help="Type of connection between siblings")
-    parser.add_argument("--per", "--per-parent", "--children-per-parent", dest="children_per_parent", 
+    parser.add_argument("--per", "--per-parent", "--child-per-parent", "--children-per-parent", dest="children_per_parent", 
                         default=3, nargs="?", type=int,
                         help="Average number of children per parent")
     parser.add_argument("--dev", "--deviation", "--child-no-deviation", dest="child_no_deviation",
@@ -179,7 +182,7 @@ if __name__ == "__main__":
 
     kwargs = {}
     for name, arg in vars(args).items():
-        if name == "crit":
+        if name == "criticality":
             if arg is not None:
                 arg = {"degree":criticality_by_degree, "power_flow":criticality_by_power_flow,
                        "capacity":criticality_by_capacity}[arg.strip().lower()]
@@ -190,7 +193,7 @@ if __name__ == "__main__":
         if name != args.param_name:
             kwargs[name] = arg
     print(kwargs)
-    save_dir = out_dir=Path.cwd() / "data" / "results" / kwargs["param_name"]
+    save_dir = out_dir=Path.cwd() / "data" / "results" / kwargs["param_name"] / kwargs["save_name"]
     save_dir.mkdir(exist_ok=True, parents=True)
     with open(save_dir / f"{kwargs.get('save_name')}_metadata.yaml", "w") as f:
         yaml.dump(kwargs, f)
@@ -198,5 +201,8 @@ if __name__ == "__main__":
     start = time.time()
     run_experiment(out_dir=save_dir,
                    **kwargs)
-    end = time.time()
+    duration = time.time() - start
+    with open(save_dir / f"{kwargs.get('save_name')}.info", "w") as f:
+        f.writelines([f"duration (seconds):{duration}\n",
+                      f"time per entrypoint (seconds): {duration / kwargs["n_attacks"]}\n"])
     
