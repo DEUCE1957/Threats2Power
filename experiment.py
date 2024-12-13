@@ -147,7 +147,7 @@ if __name__ == "__main__":
     parser.add_argument("-N", "--N", dest="n_attacks", default=10000, nargs="?", type=int,
                         help="Number of attacks / Monte Carlo simultions")
     parser.add_argument("--crit", "--criticality", dest="criticality", default=None, nargs="?", type=str,
-                        help="One of 'capacity', 'power_flow', or 'degree'")
+                        help="One of 'capacity', 'powerflow', or 'degree'")
     parser.add_argument("--spec", default="Default", nargs="?", type=str,
                         help="Which specification file to use")
     parser.add_argument("--grid", default="create_cigre_network_mv", nargs="?", type=str,
@@ -184,7 +184,7 @@ if __name__ == "__main__":
     for name, arg in vars(args).items():
         if name == "criticality":
             if arg is not None:
-                arg = {"degree":criticality_by_degree, "power_flow":criticality_by_power_flow,
+                arg = {"degree":criticality_by_degree, "powerflow":criticality_by_power_flow,
                        "capacity":criticality_by_capacity}[arg.strip().lower()]
         elif name == "grid":
             if arg == "real":
@@ -193,7 +193,7 @@ if __name__ == "__main__":
         if name != args.param_name:
             kwargs[name] = arg
     print(kwargs)
-    save_dir = out_dir=Path.cwd() / "data" / "results" / kwargs["param_name"] / kwargs["save_name"]
+    save_dir = Path.cwd() / "data" / "results" / kwargs["param_name"] / kwargs["save_name"]
     save_dir.mkdir(exist_ok=True, parents=True)
     with open(save_dir / f"{kwargs.get('save_name')}_metadata.yaml", "w") as f:
         yaml.dump(kwargs, f)
