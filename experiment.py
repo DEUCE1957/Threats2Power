@@ -1,5 +1,4 @@
 import argparse
-import random
 import math
 import warnings
 import math
@@ -51,7 +50,7 @@ def run_experiment(seed:int=0, spec:str="Default", grid:str|Path="create_cigre_n
                    param_values:list=[2, 3, 5, 8, 13, 21, 34, lambda network: network.n_devices],
                    n_attacks:int=1000, flatten:bool=False, auto_compromise_children:bool=False, 
                    out_dir:Path=Path.cwd() / "data", **kwargs):
-    np.random.seed(seed); random.seed(seed)
+    np.random.seed(seed)
     print(f"Seed: {seed}")
 
     if param_name == "n_devices" and grid is not None:

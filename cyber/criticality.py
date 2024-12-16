@@ -137,6 +137,12 @@ def criticality_by_capacity(grid, verbose:bool=False):
         Sn_mva = np.zeros(shape=df.shape[0])
         if "sn_mva" in df.columns:
             Sn_mva = df.sn_mva
+            if (nan_mask := np.isnan(Sn_mva)).any():
+                if "p_mw" in df and "q_mvar" in df: # Symmetric
+                    Sn_mva[nan_mask] = np.sqrt(np.power(df.p_mw[nan_mask], 2) + np.power(df.q_mvar[nan_mask], 2))
+                elif "p_a_mw" in df and "q_a_mvar" in df: # Asymmetric
+                    Sn_mva[nan_mask] = np.sqrt(np.power(df.p_a_mw[nan_mask]+df.p_b_mw[nan_mask]+df.p_c_mw[nan_mask], 2) + 
+                                               np.power(df.q_a_mvar[nan_mask]+df.q_b_mvar[nan_mask]+df.q_c_mvar[nan_mask], 2))
         # >> Lines <<
         elif attr == "line":
             # PandaPower only runs lines between the same nominal voltage

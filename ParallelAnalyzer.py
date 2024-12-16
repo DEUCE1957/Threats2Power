@@ -234,7 +234,7 @@ if __name__ == "__main__":
         elif name == "grid":
             if arg == "real":
                 arg = Path.cwd() / "data" / "SpanishLVNetwork" / "RunDss" / "grid.json"
-            kwargs["grid_kwargs"] = {"with_der":"all"} if arg == "create_cigre_network_mv" else {}
+            kwargs["grid_kwargs"] = {"with_der":"all"} if arg in ["cigre", "create_cigre_network_mv"] else {}
         if name != args.param_name:
             kwargs[name] = arg
     
@@ -243,22 +243,22 @@ if __name__ == "__main__":
     n_cpu = max(1, int(ray.available_resources().get("CPU", 1)) - 1)
     
     # >> Load Physical Grid <<
-    with (open(Path.cwd() / "data" / "SpanishLVNetwork" / "RunDss" / "grid.json") as f,
-          warnings.catch_warnings(category=FutureWarning, action="ignore")):
-        real_grid = pandapower.from_json(f)
     grid_map = {name:creator for name, creator in inspect.getmembers(pandapower.networks, predicate=inspect.isfunction)}
-    grid_map.update({"real":real_grid, "cigre":pandapower.networks.cigre_networks.create_cigre_network_mv})
+    grid_map.update({"cigre":pandapower.networks.cigre_networks.create_cigre_network_mv})
     with warnings.catch_warnings():
         warnings.filterwarnings(action="ignore", category=FutureWarning)
         if type(kwargs["grid"]) is str:
             grid = grid_map.get(kwargs["grid"])(**kwargs["grid_kwargs"])
-        elif type(kwargs["grid"]) is Path:
+        elif isinstance(kwargs["grid"], Path):
             grid = pandapower.from_json(kwargs["grid"])
         else:
+            print("Warning: No grid loaded, criticality is ignored")
             grid = None # No physical grid
-    
     # >> Set Communication Network Parameters <<
-    criticality = kwargs["criticality"](grid, verbose=False)[0] if (kwargs["criticality"] != "" and grid is not None) else None
+    if kwargs["criticality"] != "" and grid is not None:
+        criticality_map, _, _ = kwargs["criticality"](grid, verbose=False)
+    else:
+        criticality_map = None
     spec_path = Path.cwd() / "specifications" / f"{args.network_specs.capitalize()}_specifications.json"
     network_kwargs = dict(
         n_devices = kwargs.get("n_devices", 20), # Only affects comm. network topology if Grid is None
@@ -267,7 +267,7 @@ if __name__ == "__main__":
         sibling_to_sibling_comm = kwargs.get("sibling_to_sibling_comm", "all"),
         grid = grid, # Selects which physical grid comm. network will oversee
         network_specs = spec_path, # Specifies comm. network component types / defeneses
-        criticality = criticality,
+        criticality = criticality_map,
         crit_norm = False,
         effort_only = False,
         n_entrypoints = 1,
@@ -279,68 +279,85 @@ if __name__ == "__main__":
         save_dir = Path.cwd() / "data" / "results" / args.param_name / args.save_name
     else:
         save_dir = Path.cwd() / "data" / "results" / "FixedParams" / args.save_name
-    save_dir.mkdir(exist_ok=True, parents=True)
-    with open(save_dir / f"{args.save_name}_metadata.yaml", "w") as f:
-        yaml.dump({**args.__dict__,**kwargs}, f)
+        
+    load_previous = False
+    if save_dir.exists():
+        while (resp := input("Run Monte ('run') or Load Previous ('load')?").strip().lower()) not in ('run', 'load'):
+            continue
+        if resp == 'load':
+            load_previous = True
+        
+    if not load_previous:
+        save_dir.mkdir(exist_ok=True, parents=True)
+        with open(save_dir / f"{args.save_name}_metadata.yaml", "w") as f:
+            yaml.dump({**args.__dict__,**kwargs}, f)
+        
+        # >> Initialize Ray Actors <<
+        task_queue = Queue()
+        N_ATTACKS = args.N
+        # NOTE: Varying entrypoint is NOT compatible with varying the network structure
+        N_ENTRYPOINTS = network.n_components if args.vary_entrypoints and not args.random_entry else 1
+        N_PARAMS = len(kwargs["param_values"])
+        overseer = MonteOverseer.remote(N_ENTRYPOINTS, N_ATTACKS, N_PARAMS, task_queue)
+        attacker_config = AttackerConfig(budget=kwargs.get("budget", 52.0),
+                                        auto_compromise_children=kwargs.get("auto_compromise_children", False),
+                                        verbose=False)
+        
+        workers = [MonteActor.remote(actor_id, task_queue, kwargs["global_seed"], RandomAttacker, attacker_config, 
+                                    param=kwargs["param_name"], param_values=kwargs["param_values"],
+                                    device_only=args.device_only, random_entry=args.random_entry,
+                                    **network_kwargs) for actor_id in range(n_cpu-1)]
+        overseer.run.remote()
+        
+        # >> Queue Tasks for Ray Actors <<
+        pos = 0
+        idcs = range(N_ATTACKS)
+        seeds = np.random.choice(N_ATTACKS, size=N_ATTACKS, replace=False)
+        entrypoints = np.arange(N_ENTRYPOINTS)
+        
+        print(f"Total Number of Tasks: {N_ATTACKS*N_ENTRYPOINTS*N_PARAMS}")
+        
+        print("Starting Monte Carlo Simulations")
+        start_time = time.time()
+        for param_idx in tqdm.tqdm(range(N_PARAMS), desc="Param ::", total=N_PARAMS, position=0):
+            for entrypoint_idx in tqdm.tqdm(entrypoints, desc="Entrypoint :: ", total=N_ENTRYPOINTS, position=1):
+                for attack_idx, seed in tqdm.tqdm(zip(idcs, seeds), desc="Iteration ::", total=N_ATTACKS, position=2):
+                    if args.random_entry: # Randomly choose an entrypoint
+                        entrypoint_idx = np.random.choice(network.n_components)
+                    workers[pos % len(workers)].work.remote(attack_idx, int(seed), entrypoint_idx, param_idx)
+                    pos += 1
+        print("Finished Sending Monte Carlo Tasks")
+        
+        # >> Fetch results <<
+        compromised, effort, criticality = ray.get(overseer.get.remote())
+        duration = time.time() - start_time
     
-    # >> Initialize Ray Actors <<
-    task_queue = Queue()
-    N_ATTACKS = args.N
-    # NOTE: Varying entrypoint is NOT compatible with varying the network structure
-    N_ENTRYPOINTS = network.n_components if args.vary_entrypoints and not args.random_entry else 1
-    N_PARAMS = len(kwargs["param_values"])
-    overseer = MonteOverseer.remote(N_ENTRYPOINTS, N_ATTACKS, N_PARAMS, task_queue)
-    attacker_config = AttackerConfig(budget=kwargs.get("budget", 52.0),
-                                     auto_compromise_children=kwargs.get("auto_compromise_children", False),
-                                     verbose=False)
-    
-    workers = [MonteActor.remote(actor_id, task_queue, kwargs["global_seed"], RandomAttacker, attacker_config, 
-                                 param=kwargs["param_name"], param_values=kwargs["param_values"],
-                                 device_only=args.device_only, random_entry=args.random_entry,
-                                **network_kwargs) for actor_id in range(n_cpu-1)]
-    overseer.run.remote()
-    
-    # >> Queue Tasks for Ray Actors <<
-    pos = 0
-    idcs = range(N_ATTACKS)
-    seeds = np.random.choice(N_ATTACKS, size=N_ATTACKS, replace=False)
-    entrypoints = np.arange(N_ENTRYPOINTS)
-    
-    print(f"Total Number of Tasks: {N_ATTACKS*N_ENTRYPOINTS*N_PARAMS}")
-    
-    print("Starting Monte Carlo Simulations")
-    start_time = time.time()
-    for param_idx in tqdm.tqdm(range(N_PARAMS), desc="Param ::", total=N_PARAMS, position=0):
-        for entrypoint_idx in tqdm.tqdm(entrypoints, desc="Entrypoint :: ", total=N_ENTRYPOINTS, position=1):
-            for attack_idx, seed in tqdm.tqdm(zip(idcs, seeds), desc="Iteration ::", total=N_ATTACKS, position=2):
-                if args.random_entry: # Randomly choose an entrypoint
-                    entrypoint_idx = np.random.choice(network.n_components)
-                workers[pos % len(workers)].work.remote(attack_idx, int(seed), entrypoint_idx, param_idx)
-                pos += 1
-    print("Finished Sending Monte Carlo Tasks")
-    
-    # >> Fetch results <<
-    compromised, effort, criticality = ray.get(overseer.get.remote())
-    duration = time.time() - start_time
-    
-    # >> Archive Results to Disk <<
-    print("Writing Archive to File ...")
-    np.savez(save_dir / f"{kwargs['save_name']}.npz",
-             compromise=compromised,
-             effort=effort,
-             criticality=criticality)
-    print("Finished Writing Archive to File")
-    
-    # >> Save Time Profiling <<
-    with open(save_dir / f"{args.save_name}_ComputeTime.yaml", "w") as f:
-        yaml.dump({"n_cpu":n_cpu, "total time taken (s)": duration, 
-                   "n_attacks": N_ATTACKS, "n_entrypoints":N_ENTRYPOINTS, "n_params":N_PARAMS,
-                   "time / sample (s)": duration/(N_ATTACKS*N_ENTRYPOINTS*N_PARAMS),
-                   "time / entrypoint (s)": duration/(N_ENTRYPOINTS*N_PARAMS),
-                   "time / param (s)": duration/(N_PARAMS)}, f)
+        # >> Archive Results to Disk <<
+        print("Writing archive to file ...")
+        np.savez(save_dir / f"{kwargs['save_name']}.npz",
+                compromise=compromised,
+                effort=effort,
+                criticality=criticality)
+        print("Finished writing archive to file")
+        
+        # >> Save Time Profiling <<
+        with open(save_dir / f"{args.save_name}_ComputeTime.yaml", "w") as f:
+            yaml.dump({"n_cpu":n_cpu, "total time taken (s)": duration, 
+                    "n_attacks": N_ATTACKS, "n_entrypoints":N_ENTRYPOINTS, "n_params":N_PARAMS,
+                    "time / sample (s)": duration/(N_ATTACKS*N_ENTRYPOINTS*N_PARAMS),
+                    "time / entrypoint (s)": duration/(N_ENTRYPOINTS*N_PARAMS),
+                    "time / param (s)": duration/(N_PARAMS)}, f)
+    else: # Load Previous
+        print("Reading archive from file ...")
+        arrays = np.load(save_dir / f"{kwargs['save_name']}.npz")
+        compromised = arrays.get("compromise", None)
+        effort = arrays.get("effort", None)
+        criticality = arrays.get("criticality", None)
+        print("Finished reading archive from file")
     
     analyzer = Analyzer(network)
-    print(compromised.shape, effort.shape, criticality.shape, (N_ATTACKS, N_ENTRYPOINTS, N_PARAMS))
+    for name, array in zip(["Compromised", "Effort", "Criticality"], [compromised, effort, criticality]):
+        print(f"{name} array :: Min {array.min():.4f} :: Max {array.max():.4f} :: Mean {array.mean():.4f} :: Shape {array.shape}")
     analyzer.res_monte = {**{"compromised":compromised, "effort":effort, "criticality":criticality},
                           **({"param_name":args.param_name, "param_values":args.param_values})}
     analyzer.plot_monte(save_name=args.save_name, save_dir=save_dir,

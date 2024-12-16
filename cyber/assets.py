@@ -3,7 +3,6 @@ from math import isclose
 from collections import OrderedDict
 from scipy.stats import distributions as distr
 
-
 class Vulnerability():
 
     """
