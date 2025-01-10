@@ -24,6 +24,7 @@ import tqdm
 import ray
 from pathlib import Path
 from ray.util.queue import Queue
+from ray.experimental.tqdm_ray import tqdm
 from dataclasses import dataclass
 from attackers.interface import Attacker
 from attackers.random_attacker import RandomAttacker
@@ -77,7 +78,7 @@ class MonteOverseer():
         return (self.compromised, self.effort, self.criticality)
     
     def run(self):
-        while True:
+        for _ in tqdm(range(self.fill_limit+1)):
             sample:MonteSample = self.queue.get(block=True)
             
             # Put sample into pre-allocated arrays
@@ -87,10 +88,14 @@ class MonteOverseer():
             self.criticality[i, j, v] = sample.critical_sum
             
             self.fill_level += 1
+            
+            if self.fill_level % 100 == 0:
+                print(f"Overseer :: Fill Level {self.fill_level}/{self.fill_limit} ({100.0*(self.fill_level/self.fill_limit):.4f}%)")
+            
             # Finished processing all tasks
             if self.fill_level == self.fill_limit:
                 break
-        logging.info("Overseer :: Finished Monte Carlo simulation")
+        print("Overseer :: Finished Monte Carlo simulation")
 
 @ray.remote(num_cpus=1)
 class MonteActor():
@@ -175,7 +180,7 @@ class MonteActor():
         
         self.i += 1
         if self.i % self.report_freq == 0:
-            logging.info(f"Actor {self.actor_id} :: Samples Completed {self.i}")
+            print(f"Actor {self.actor_id} :: Samples Completed {self.i}")
 
 if __name__ == "__main__":
     parser = argparse.ArgumentParser(prog='ParallelAnalyzer',
@@ -319,9 +324,9 @@ if __name__ == "__main__":
         
         print("Starting Monte Carlo Simulations")
         start_time = time.time()
-        for param_idx in tqdm.tqdm(range(N_PARAMS), desc="Param ::", total=N_PARAMS, position=0):
-            for entrypoint_idx in tqdm.tqdm(entrypoints, desc="Entrypoint :: ", total=N_ENTRYPOINTS, position=1):
-                for attack_idx, seed in tqdm.tqdm(zip(idcs, seeds), desc="Iteration ::", total=N_ATTACKS, position=2):
+        for param_idx in tqdm(range(N_PARAMS), desc="Param ::", total=N_PARAMS, position=0):
+            for entrypoint_idx in tqdm(entrypoints, desc="Entrypoint :: ", total=N_ENTRYPOINTS, position=1):
+                for attack_idx, seed in tqdm(zip(idcs, seeds), desc="Iteration ::", total=N_ATTACKS, position=2):
                     if args.random_entry: # Randomly choose an entrypoint
                         entrypoint_idx = np.random.choice(network.n_components)
                     workers[pos % len(workers)].work.remote(attack_idx, int(seed), entrypoint_idx, param_idx)

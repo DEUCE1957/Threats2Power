@@ -88,7 +88,9 @@ def hierarchy_layout(G:nx.DiGraph, root:CommNode, size:float=1., gap:float=0.2, 
     return _hierarchy_pos(G, root, size, gap, loc, center, invert=invert)
 
 def plot_communication_network(network:CommNetwork, attacker:Attacker=None, palette:str="tab10", layout=hierarchy_layout,
-                               ax=None, save_name:str=None, show_legend:bool=True, invert:bool=False, show:bool=True, **kwargs):
+                               ax=None, save_name:str=None, invert:bool=False,
+                               show_legend:bool=True, legend_loc="lower center", legend_offset:float=-0.1,
+                               show:bool=True, node_size:int=400, **kwargs):
     """
     Plots a tree-like and spring layout of the given communication network.
     The visualization shows:
@@ -111,12 +113,14 @@ def plot_communication_network(network:CommNetwork, attacker:Attacker=None, pale
     node_edge_color_mask = np.full(network.graph.number_of_nodes(), fill_value="#000000", dtype=object)
     edge_color_mask = np.full(network.graph.number_of_edges(), fill_value="#000000", dtype=object)
 
-    node_types = set(node.name for node in network.graph.nodes())
-    color_lookup = {k:v for k,v in zip(node_types,
-                        sns.color_palette(palette, n_colors=len(node_types)))}
-    node_to_pos = {}
+    # node_types = set(node.name for node in network.graph.nodes())
+    node_types = ["Sensor Device", "Aggregator", "Controller Device", "Control Center"]
+    palette = sns.color_palette(palette, n_colors=len(node_types))
+    color_lookup = {k:v for k,v in zip(node_types, palette)}
+    
 
     # Custom Legend
+    node_to_pos = {}
     legend_map = {}
     for i, node in enumerate(network.graph.nodes()):
         node_to_pos[node] = i
@@ -159,13 +163,13 @@ def plot_communication_network(network:CommNetwork, attacker:Attacker=None, pale
     else:
         pos = layout(nx.to_undirected(network.graph))
     nx.draw_networkx_nodes(network.graph, pos=pos, ax=ax,
-                           node_size=400, node_shape="s", node_color=node_color_mask,
+                           node_size=node_size, node_shape="s", node_color=node_color_mask,
                            linewidths=1.0, edgecolors=node_edge_color_mask)
     nx.draw_networkx_labels(network.graph, pos=pos, labels=label_map, ax=ax, font_size=10)
     nx.draw_networkx_edges(network.graph, pos=pos, ax=ax, edge_color=edge_color_mask)
     
     if show_legend:
-        ax.legend(labels=labels, handles=handles, loc="lower center", bbox_to_anchor=(0.5, -0.1), ncol=len(labels),
+        ax.legend(labels=labels, handles=handles, ncol=1, loc=legend_loc, bbox_to_anchor=(0.0, legend_offset), # ncol=len(labels),
                    title="Legend", fancybox=True, fontsize='large', title_fontsize='larger')
     plt.tight_layout()
     if save_name is not None:

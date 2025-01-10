@@ -285,7 +285,7 @@ class CyberDevice():
             raise KeyError(f"Defence mechanism of type '{defence.name}' already" +
                            "present in the set of Defences")
 
-    def remove_defence(self, defence:Defence|str) -> bool:
+    def remove_defence(self, defence:Defence) -> bool:
         """
         Remove a defence (by name or reference) from the set of defences.
 
@@ -301,7 +301,7 @@ class CyberDevice():
             return True
         return False
 
-    def attach_vulnerability(self, defence:Defence|str, vulnerability:Vulnerability) -> bool:
+    def attach_vulnerability(self, defence:Defence, vulnerability:Vulnerability) -> bool:
         """
         Attach a vulnerability to a specific defence. 
 
@@ -318,7 +318,7 @@ class CyberDevice():
             return True
         return False
 
-    def remove_vulnerability(self, defence:Defence|str) -> bool:
+    def remove_vulnerability(self, defence:Defence) -> bool:
         """
         Remove a vulnerability from a specific defence. 
 
