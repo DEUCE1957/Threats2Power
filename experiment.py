@@ -65,9 +65,11 @@ def run_experiment(seed:int=0, spec:str="Default", grid:str|Path="create_cigre_n
         criticality = criticality(grid, verbose=False)[0] if criticality is not None else criticality
         spec_path = Path.cwd() / "specifications" / f"{spec.capitalize()}_specifications.json"
         network = CommNetwork(n_devices=kwargs.get("n_devices", 20),
-                              n_entrypoints=kwargs.get("n_entrypoints", 1), child_no_deviation=kwargs.get("child_no_deviation", 0),
+                              n_entrypoints=kwargs.get("n_entrypoints", 1),
+                              child_no_deviation=kwargs.get("child_no_deviation", 0),
                               children_per_parent=kwargs.get("children_per_parent", 3),
                               sibling_to_sibling_comm=kwargs.get("sibling_to_sibling_comm", None),
+                              repeated_attacks=kwargs.get("repeated_attacks", False),
                               criticality=criticality,
                               network_specs=spec_path, grid=grid)
     print(f"Number of Components: {network.n_components}")
@@ -84,13 +86,15 @@ def run_experiment(seed:int=0, spec:str="Default", grid:str|Path="create_cigre_n
     def run_monte(event):
         print("Running New Monte Carlo Simulation (Estimated Time to Completion: 40 minutes)")
         if len(param_values) > 1:
-            monte_kwargs = dict(seed=seed, n_attacks=n_attacks,
+            monte_kwargs = dict(seed=seed,
+                                n_attacks=n_attacks,
                                 child_no_deviation=kwargs.get("child_no_deviation", 0),
                                 auto_compromise_children=auto_compromise_children,
                                 grid=grid,
                                 vary_entrypoints=kwargs.get("vary_entrypoints", True),
                                 effort_only=kwargs.get("effort_only", False),
                                 criticality=criticality,
+                                repeated_attacks=kwargs.get("repeated_attacks", False),
                                 param_name=param_name, param_values=param_values)
             
             compromised_array, effort_array, criticality_array = analyzer.monte_carlo_multi_analysis(**monte_kwargs)
@@ -100,7 +104,8 @@ def run_experiment(seed:int=0, spec:str="Default", grid:str|Path="create_cigre_n
                 budget=kwargs.get("budget",52), device_only=False, 
                 sibling_to_sibling_comm=kwargs.get("sibling_to_sibling_comm", None),
                 vary_entrypoints=kwargs.get("vary_entrypoints", True),
-                auto_compromise_children=auto_compromise_children)
+                auto_compromise_children=auto_compromise_children,
+                repeated_attacks=kwargs.get("repeated_attacks", False),)
             compromised_array, effort_array, criticality_array = analyzer.monte_carlo_analysis(**monte_kwargs)
         np.savez(archive_path, compromise=compromised_array, effort=effort_array, criticality=criticality_array) # .flatten()
         analyzer.plot_monte(save_name=save_name, save_dir=out_dir,
@@ -117,7 +122,8 @@ def run_experiment(seed:int=0, spec:str="Default", grid:str|Path="create_cigre_n
         analyzer.res_monte = {**{"compromised":compromised_array, "effort":effort_array, "criticality":criticality_array},
                               **({} if len(param_values) == 1 else {"param_name":param_name, "param_values":param_values})}
         analyzer.plot_monte(save_name=save_name, save_dir=out_dir,
-                            figsize=(14, 16) if "criticality" in arrays else (14,12), flatten=flatten)
+                            figsize=(14, 16) if "criticality" in arrays else (14,12), flatten=flatten,
+                            **kwargs)
 
     if is_interactive():
         run_button = Button(description="Run Monte", button_style="info", style=dict(font_size="Large"), continuous_update=False)
@@ -203,5 +209,5 @@ if __name__ == "__main__":
     duration = time.time() - start
     with open(save_dir / f"{kwargs.get('save_name')}.info", "w") as f:
         f.writelines([f"duration (seconds):{duration}\n",
-                      f"time per entrypoint (seconds): {duration / kwargs["n_attacks"]}\n"])
+                      f"time per entrypoint (seconds): {duration / kwargs['n_attacks']}\n"])
     

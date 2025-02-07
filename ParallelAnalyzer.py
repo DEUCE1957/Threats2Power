@@ -1,36 +1,25 @@
 import time, copy
-import logging, warnings
+import inspect, warnings, random
+import logging
 import csv, json, yaml
 import math, random
 import numpy as np
 import argparse
 import pandapower
 import tqdm
+import ray
 import multiprocessing as mp
-from multiprocessing import Process, Queue, current_process, freeze_support
+from pathlib import Path
+from dataclasses import dataclass
+from ray.util.queue import Queue
+from ray.experimental.tqdm_ray import tqdm
+# from multiprocessing import Process, Queue, current_process, freeze_support
 from communication.network import CommNetwork
 from cyber.analysis import Analyzer
 from attackers.interface import Attacker
 from attackers.random_attacker import RandomAttacker
 from communication.components import Device
 from cyber.criticality import criticality_by_degree, criticality_by_power_flow, criticality_by_capacity
-from pathlib import Path
-
-
-import inspect, warnings, random
-import numpy as np
-import pandapower
-import tqdm
-import ray
-from pathlib import Path
-from ray.util.queue import Queue
-from ray.experimental.tqdm_ray import tqdm
-from dataclasses import dataclass
-from attackers.interface import Attacker
-from attackers.random_attacker import RandomAttacker
-from communication.network import CommNetwork
-from communication.components import Device
-from cyber.criticality import criticality_by_capacity
 
 def strtobool(val):
     """Convert a string representation of truth to true (1) or false (0).
@@ -52,6 +41,7 @@ class AttackerConfig:
     budget:float 
     auto_compromise_children:bool = False
     verbose:bool = False
+    repeated_attacks:bool = False
     
 @dataclass
 class MonteSample:
@@ -62,42 +52,7 @@ class MonteSample:
     total_effort_spent:float
     critical_sum:float = 0.0
 
-@ray.remote
-class MonteOverseer():
-    
-    def __init__(self, n_entrypoints:int, n_attacks_per_entrypoint:int,
-                 n_params:int, queue:Queue):
-        self.fill_level = 0
-        self.fill_limit = n_entrypoints*n_attacks_per_entrypoint
-        self.compromised = np.zeros((n_attacks_per_entrypoint, n_entrypoints, n_params), dtype=np.int32)
-        self.effort = np.zeros((n_attacks_per_entrypoint, n_entrypoints, n_params), dtype=np.float32)
-        self.criticality = np.zeros((n_attacks_per_entrypoint, n_entrypoints, n_params), dtype=np.float32)
-        self.queue = queue
-        
-    def get(self):
-        return (self.compromised, self.effort, self.criticality)
-    
-    def run(self):
-        for _ in tqdm(range(self.fill_limit+1)):
-            sample:MonteSample = self.queue.get(block=True)
-            
-            # Put sample into pre-allocated arrays
-            i, j, v = sample.attack_idx, sample.entrypoint_idx, sample.param_idx
-            self.compromised[i, j, v] = sample.n_compromised
-            self.effort[i, j, v] = sample.total_effort_spent
-            self.criticality[i, j, v] = sample.critical_sum
-            
-            self.fill_level += 1
-            
-            if self.fill_level % 100 == 0:
-                print(f"Overseer :: Fill Level {self.fill_level}/{self.fill_limit} ({100.0*(self.fill_level/self.fill_limit):.4f}%)")
-            
-            # Finished processing all tasks
-            if self.fill_level == self.fill_limit:
-                break
-        print("Overseer :: Finished Monte Carlo simulation")
-
-@ray.remote(num_cpus=1)
+@ray.remote(num_cpus=1, max_restarts=1)
 class MonteActor():
     
     """
@@ -112,42 +67,43 @@ class MonteActor():
                  random_entry:bool=True,
                  report_freq:int=1000,
                  **network_kwargs):
-        self.actor_id = actor_id
-        self.i = 0
-        self.queue = queue
+        self.actor_id:int = actor_id
+        self.i:int = 0
+        self.queue:Queue = queue
         # NOTE: Each time the network is initialized, the effort and success prob. is fixed
         # Need to reset these each time to ensure we get different numbers when compromising
         # it again
-        self.global_seed = global_seed
-        self.param = param.strip()
-        self.param_values = param_values
-        self.network_kwargs = network_kwargs
+        self.global_seed:int = global_seed
+        self.param:str = param.strip()
+        self.param_values:list = param_values
+        self.network_kwargs:dict = network_kwargs
         np.random.seed(self.global_seed)
         # Use many networks, but only create each once
         if self.param != "" and self.param in self.network_kwargs: 
             self.network_kwargs[self.param] = param_values[0]
-            self.network = {param_values[0]: CommNetwork(**network_kwargs)}
+            self.network_lookup:dict = {param_values[0]: CommNetwork(**network_kwargs)}
         else: # Only use 1 network throughout
-            self.network = CommNetwork(**network_kwargs)
-        self.attacker_class = attacker_class
-        self.attacker_kwargs = attacker_config.__dict__
-        self.attacker = self.attacker_class(**self.attacker_kwargs)
-        self.device_only = device_only
-        self.random_entry = random_entry
-        self.report_freq = report_freq
-        
+            self.network_lookup:CommNetwork = CommNetwork(**network_kwargs)
+        self.attacker_class:Attacker = attacker_class
+        self.attacker_kwargs:dict = attacker_config.__dict__
+        self.attacker:Attacker = self.attacker_class(**self.attacker_kwargs)
+        self.device_only:bool = device_only
+        self.random_entry:bool = random_entry
+        self.report_freq:int = report_freq
+        print(f"Monte Actor {actor_id} | Global Seed {global_seed} | Param '{self.param}' | Attacker {self.attacker_class.__name__}")
+    
     def work(self, idx:int, seed:int, entrypoint:int, param_idx:int):
         # >> Select Communication Network <<
         param_value = self.param_values[param_idx]
         if self.param == "" or self.param not in self.network_kwargs:
-            network = self.network
-        elif param_value in self.network:
-            network = self.network[network]
+            network = self.network_lookup
+        elif param_value in self.network_lookup:
+            network = self.network_lookup[network]
         else: # Haven't seen this configuration before
             np.random.seed(self.global_seed)
             self.network_kwargs[self.param] = param_value
             network = CommNetwork(**self.network_kwargs)
-            self.network[param_value] = network
+            self.network_lookup[param_value] = network
         # Parameter of Attacker can also be varied
         if self.param in self.attacker_kwargs:
             attacker = self.attacker_class(**self.attacker_kwargs)
@@ -178,10 +134,88 @@ class MonteActor():
         # Asynchronously publish results to queue
         self.queue.put_nowait(sample)
         
+        
         self.i += 1
         if self.i % self.report_freq == 0:
             print(f"Actor {self.actor_id} :: Samples Completed {self.i}")
+            
+        return True
 
+class MonteScheduler():
+    
+    def __init__(self, workers:list[ray.ObjectRef], n_params:int, n_entrypoints:int, n_attacks:int, random_entry:bool=False, task_limit:int=1000):
+        # self.queue = queue
+        self.n_workers = len(workers)
+        
+        self.n_params = n_params
+        self.n_entrypoints = n_entrypoints
+        self.random_entry = random_entry
+        self.n_attacks = n_attacks
+        self.total_tasks = self.n_params*self.n_entrypoints*self.n_attacks
+        self.attack_idcs = range(self.n_attacks)
+        self.seeds = np.random.choice(self.n_attacks, size=self.n_attacks, replace=False)
+        
+        self.pos = 0
+        self.position = {"param_idx":0, "entrypoint_idx":0, "attack_idx":0}
+        self.tasks = []
+        self.task_limit = task_limit
+    
+        self.no_of_tasks_queued = 0 # self.queue.size()
+        
+    def schedule(self):
+        print(f"Scheduler: Scheduling {self.total_tasks} new tasks")
+        
+        # stop_early = False
+        for param_idx in tqdm(range(self.n_params),
+                            desc="Param ::", total=self.n_params, position=0):
+            for entrypoint_idx in tqdm(range(self.n_entrypoints),
+                                    desc="Entrypoint :: ", total=self.n_entrypoints, position=1):
+                for attack_idx, seed in tqdm(zip(range(self.n_attacks), 
+                                                self.seeds[self.position["attack_idx"]:]), 
+                                            desc="Iteration ::", total=self.n_attacks, position=2):
+                    if self.random_entry: # Randomly choose an entrypoint
+                        entrypoint_idx = np.random.choice(self.n_entrypoints)
+                    self.tasks.append(workers[self.pos % self.n_workers].work.remote(attack_idx, int(seed), entrypoint_idx, param_idx))
+                    self.pos += 1
+                    
+                    # Wait for tasks to finish before continuing
+                    if len(self.tasks) > self.task_limit:
+                        ray.wait(self.tasks, num_returns=1)
+        print(f"Finished Scheduling {self.pos+1} Tasks")
+
+@ray.remote
+class MonteOverseer():
+    
+    def __init__(self, n_entrypoints:int, n_attacks_per_entrypoint:int, n_params:int, queue:Queue):
+        self.fill_level = 0
+        self.fill_limit = n_entrypoints*n_attacks_per_entrypoint*n_params
+        self.compromised = np.zeros((n_attacks_per_entrypoint, n_entrypoints, n_params), dtype=np.int32)
+        self.effort = np.zeros((n_attacks_per_entrypoint, n_entrypoints, n_params), dtype=np.float32)
+        self.criticality = np.zeros((n_attacks_per_entrypoint, n_entrypoints, n_params), dtype=np.float32)
+        self.queue:Queue = queue
+        
+    def get(self):
+        return (self.compromised, self.effort, self.criticality)
+    
+    def run(self):
+        for _ in tqdm(range(self.fill_limit+1)):
+            sample:MonteSample = self.queue.get(block=True)
+            
+            # Put sample into pre-allocated arrays
+            i, j, v = sample.attack_idx, sample.entrypoint_idx, sample.param_idx
+            self.compromised[i, j, v] = sample.n_compromised
+            self.effort[i, j, v] = sample.total_effort_spent
+            self.criticality[i, j, v] = sample.critical_sum
+            
+            self.fill_level += 1
+            
+            if self.fill_level % 100 == 0:
+                print(f"Overseer :: Fill Level {self.fill_level}/{self.fill_limit} ({100.0*(self.fill_level/self.fill_limit):.4f}%)")
+            # Finished processing all tasks
+            if self.fill_level == self.fill_limit:
+                break
+        print("Overseer :: Finished Monte Carlo simulation")
+    
 if __name__ == "__main__":
     parser = argparse.ArgumentParser(prog='ParallelAnalyzer',
                     description='Monte Carlo Cyber Attack Simulation',
@@ -207,6 +241,8 @@ if __name__ == "__main__":
                         nargs='?', default=52.0, help='Size of attacker budget')
     parser.add_argument('-E', '--vary_entrypoints', dest="vary_entrypoints", type=lambda x:bool(strtobool(x)),
                         nargs='?', default=True, help='Whether to vary the entrypoints')
+    parser.add_argument('--repeat_attacks', '--repeated_attacks', dest="repeated_attacks", type=lambda x:bool(strtobool(x)),
+                        nargs='?', default=True, help='Whether to allow repeated attacks if initial comproise is unsuccessful')
     parser.add_argument('-R', '--random_entry', dest="random_entry", type=lambda x:bool(strtobool(x)),
                         nargs='?', default=False, help='Randomize entrypoint')
     parser.add_argument('--auto', dest="auto_compromise_children", type=lambda x:bool(strtobool(x)),
@@ -244,7 +280,7 @@ if __name__ == "__main__":
             kwargs[name] = arg
     
     if not ray.is_initialized():
-        ray.init()
+        ray.init(log_to_driver=True)
     n_cpu = max(1, int(ray.available_resources().get("CPU", 1)) - 1)
     
     # >> Load Physical Grid <<
@@ -303,36 +339,28 @@ if __name__ == "__main__":
         # NOTE: Varying entrypoint is NOT compatible with varying the network structure
         N_ENTRYPOINTS = network.n_components if args.vary_entrypoints and not args.random_entry else 1
         N_PARAMS = len(kwargs["param_values"])
+        
+        # Overseer will store results, and periodically prompt the scheduler to add more tasks
         overseer = MonteOverseer.remote(N_ENTRYPOINTS, N_ATTACKS, N_PARAMS, task_queue)
+        
         attacker_config = AttackerConfig(budget=kwargs.get("budget", 52.0),
-                                        auto_compromise_children=kwargs.get("auto_compromise_children", False),
-                                        verbose=False)
+                                         auto_compromise_children=kwargs.get("auto_compromise_children", False),
+                                         repeated_attacks=kwargs.get("repeated_attacks", False),
+                                         verbose=False)
         
         workers = [MonteActor.remote(actor_id, task_queue, kwargs["global_seed"], RandomAttacker, attacker_config, 
-                                    param=kwargs["param_name"], param_values=kwargs["param_values"],
-                                    device_only=args.device_only, random_entry=args.random_entry,
-                                    **network_kwargs) for actor_id in range(n_cpu-1)]
+                                     param=kwargs["param_name"], param_values=kwargs["param_values"],
+                                     device_only=args.device_only, random_entry=args.random_entry,
+                                     **network_kwargs) for actor_id in range(n_cpu-1)]
         overseer.run.remote()
         
-        # >> Queue Tasks for Ray Actors <<
-        pos = 0
-        idcs = range(N_ATTACKS)
-        seeds = np.random.choice(N_ATTACKS, size=N_ATTACKS, replace=False)
-        entrypoints = np.arange(N_ENTRYPOINTS)
-        
-        print(f"Total Number of Tasks: {N_ATTACKS*N_ENTRYPOINTS*N_PARAMS}")
-        
         print("Starting Monte Carlo Simulations")
+        print(f"Total Number of Tasks: {N_ATTACKS*N_ENTRYPOINTS*N_PARAMS}")
         start_time = time.time()
-        for param_idx in tqdm(range(N_PARAMS), desc="Param ::", total=N_PARAMS, position=0):
-            for entrypoint_idx in tqdm(entrypoints, desc="Entrypoint :: ", total=N_ENTRYPOINTS, position=1):
-                for attack_idx, seed in tqdm(zip(idcs, seeds), desc="Iteration ::", total=N_ATTACKS, position=2):
-                    if args.random_entry: # Randomly choose an entrypoint
-                        entrypoint_idx = np.random.choice(network.n_components)
-                    workers[pos % len(workers)].work.remote(attack_idx, int(seed), entrypoint_idx, param_idx)
-                    pos += 1
-        print("Finished Sending Monte Carlo Tasks")
-        
+        # Scheduler will Queue tasks for Ray Actors
+        scheduler = MonteScheduler(workers, N_PARAMS, N_ENTRYPOINTS, N_ATTACKS, random_entry=args.random_entry,
+                                   task_limit=1000)
+        scheduler.schedule()
         # >> Fetch results <<
         compromised, effort, criticality = ray.get(overseer.get.remote())
         duration = time.time() - start_time
