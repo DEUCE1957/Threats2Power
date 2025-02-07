@@ -8,12 +8,10 @@ import argparse
 import pandapower
 import tqdm
 import ray
-import multiprocessing as mp
 from pathlib import Path
 from dataclasses import dataclass
 from ray.util.queue import Queue
 from ray.experimental.tqdm_ray import tqdm
-# from multiprocessing import Process, Queue, current_process, freeze_support
 from communication.network import CommNetwork
 from cyber.analysis import Analyzer
 from attackers.interface import Attacker
