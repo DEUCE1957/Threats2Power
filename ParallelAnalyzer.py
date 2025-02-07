@@ -179,7 +179,7 @@ class MonteScheduler():
                     # Wait for tasks to finish before continuing
                     if len(self.tasks) > self.task_limit:
                         ray.wait(self.tasks, num_returns=1)
-        print(f"Finished Scheduling {self.pos+1} Tasks")
+        print(f"Finished Scheduling {self.pos} Tasks")
 
 @ray.remote
 class MonteOverseer():
@@ -260,6 +260,8 @@ if __name__ == "__main__":
                         nargs='?', default="default", help="Network specifications")
     parser.add_argument('-G', '--grid', dest="grid", type=str,
                     nargs='?', default="create_cigre_network_mv", help="Type of physical grid to load")
+    parser.add_argument('-i', "--interactive", dest="interactive", type=lambda x:bool(strtobool(x)),
+                        nargs='?', default=True, help='Whether to prompt user for choices')
     args = parser.parse_args()
     
     np.random.seed(args.global_seed)
@@ -320,7 +322,7 @@ if __name__ == "__main__":
         save_dir = Path.cwd() / "data" / "results" / "FixedParams" / args.save_name
         
     load_previous = False
-    if save_dir.exists():
+    if save_dir.exists() and args.interactive:
         while (resp := input("Run Monte ('run') or Load Previous ('load')?").strip().lower()) not in ('run', 'load'):
             continue
         if resp == 'load':
