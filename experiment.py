@@ -1,16 +1,8 @@
-import argparse
-import math
-import warnings
-import math
-import time
-import numpy as np
-import pandas as pd
+import copy, inspect, argparse, warnings, time, yaml
+import math, numpy as np
 import pandapower
-import inspect
-import yaml
-import matplotlib.pyplot as plt
 from IPython.display import display
-from ipywidgets import Button, HBox, VBox
+from ipywidgets import Button, HBox
 from pathlib import Path
 
 from communication.network import CommNetwork
@@ -143,7 +135,7 @@ def run_experiment(seed:int=0, spec:str="Default", grid:str|Path="create_cigre_n
     else:
         print("Running Monte Carlo Simulation")
         run_monte(None)
-        
+
 if __name__ == "__main__":
     from cyber.criticality import criticality_by_degree, criticality_by_power_flow, criticality_by_capacity
     parser = argparse.ArgumentParser()
