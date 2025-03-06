@@ -5,9 +5,9 @@ from IPython.display import display
 from ipywidgets import Button, HBox
 from pathlib import Path
 
-from communication.network import CommNetwork
-from cyber.analysis import Analyzer
-from attackers.random_attacker import RandomAttacker
+from threats2power.communication.network import CommNetwork
+from threats2power.cyber.analysis import Analyzer
+from threats2power.attackers.random_attacker import RandomAttacker
 
 def is_interactive():
     try:
