@@ -9,6 +9,7 @@ import pandapower
 import tqdm
 import ray
 from pathlib import Path
+from pandapower.auxiliary import pandapowerNet
 from dataclasses import dataclass
 from ray.util.queue import Queue
 from ray.experimental.tqdm_ray import tqdm
@@ -151,7 +152,7 @@ class MonteScheduler():
                  task_limit:int=1000):
         self.n_workers = len(workers)
         self.n_params = 1 if random_param else len(params)
-        self.n_entrypoints = 1 if random_entry else n_entrypoints
+        self.n_entrypoints = n_entrypoints
         self.random_entry = random_entry
         self.random_param = random_param
         self.min_param, self.max_param = min(params), max(params)
@@ -173,7 +174,7 @@ class MonteScheduler():
         # stop_early = False
         for param_idx in tqdm(range(self.n_params),
                             desc="Param ::", total=self.n_params, position=0):
-            for entrypoint_idx in tqdm(range(self.n_entrypoints),
+            for entrypoint_idx in tqdm(range(1 if self.random_entry else self.n_entrypoints),
                                     desc="Entrypoint :: ", total=self.n_entrypoints, position=1):
                 for attack_idx, seed in tqdm(zip(range(self.n_attacks), 
                                                 self.seeds[self.position["attack_idx"]:]), 
@@ -236,8 +237,6 @@ if __name__ == "__main__":
                     epilog='--- End of Help ---')
     parser.add_argument('-N', "--N", '--n_attacks',  dest="N", type=int,
                         nargs='?', default=10000, help='Number of attacks')
-    parser.add_argument('-T', '--threads',  dest="threads", type=int,
-                        nargs='?', default=4, help='Number of parallel threads')
     parser.add_argument('--seed',  dest="global_seed", type=int,
                         nargs='?', default=0, help='Global Seed (note: reproducibility not gauranteed, use archived data)')
     parser.add_argument('-D', '--devices', dest="n_devices", type=int,
@@ -250,9 +249,9 @@ if __name__ == "__main__":
                         help="Random variation about the avg. number of children")
     parser.add_argument("-v", "--values", dest="param_values", nargs="+",
                         help="Values of parameter", type=float,
-                        default=[52])
+                        default=[50.0])
     parser.add_argument('-B', '--budget', dest="budget", type=float,
-                        nargs='?', default=52.0, help='Size of attacker budget')
+                        nargs='?', default=50.0, help='Size of attacker budget')
     parser.add_argument('-E', '--vary_entrypoints', dest="vary_entrypoints", type=lambda x:bool(strtobool(x)),
                         nargs='?', default=True, help='Whether to vary the entrypoints')
     parser.add_argument('--repeat_attacks', '--repeated_attacks', dest="repeated_attacks", type=lambda x:bool(strtobool(x)),
@@ -294,6 +293,7 @@ if __name__ == "__main__":
             if arg == "real":
                 arg = Path.cwd() / "data" / "SpanishLVNetwork" / "RunDss" / "grid.json"
             kwargs["grid_kwargs"] = {"with_der":"all"} if arg in ["cigre", "create_cigre_network_mv"] else {}
+            print("Loading Real Grid")
         if name != args.param_name:
             kwargs[name] = arg
     
@@ -307,17 +307,27 @@ if __name__ == "__main__":
     with warnings.catch_warnings():
         warnings.filterwarnings(action="ignore", category=FutureWarning)
         if type(kwargs["grid"]) is str:
-            grid = grid_map.get(kwargs["grid"])(**kwargs["grid_kwargs"])
+            grid:pandapowerNet = grid_map.get(kwargs["grid"])(**kwargs["grid_kwargs"])
         elif isinstance(kwargs["grid"], Path):
-            grid = pandapower.from_json(kwargs["grid"])
+            grid:pandapowerNet = pandapower.from_json(kwargs["grid"])
         else:
             print("Warning: No grid loaded, criticality is ignored")
-            grid = None # No physical grid
+            grid:None = None # No physical grid
     # >> Set Communication Network Parameters <<
     if kwargs["criticality"] != "" and grid is not None:
         criticality_map, _, _ = kwargs["criticality"](grid, verbose=False)
     else:
         criticality_map = None
+    
+    # >> Grid Information <<
+    if isinstance(grid, pandapowerNet):
+        print(f"Grid: {grid.name if grid.name != '' else kwargs['grid']}", end="\n")
+        for pp_elt in pandapower.pp_elements():
+            n_elt = getattr(grid, pp_elt).shape[0]
+            if n_elt > 0:
+                print(f"\t{pp_elt}: {n_elt}" + 
+                      (f"Total Criticality: {criticality_map[pp_elt].sum():.2f}" if criticality_map is not None else ""))
+    
     spec_path = Path.cwd() / "specifications" / f"{args.network_specs.capitalize()}_specifications.json"
     network_kwargs = dict(
         n_devices = kwargs.get("n_devices", 20), # Only affects comm. network topology if Grid is None
@@ -334,6 +344,9 @@ if __name__ == "__main__":
     if args.param_name in network_kwargs and args.random_param:
         raise ValueError(f"Parameter '{args.param_name}' is a network parameter, which cannot be randomly varied.")
     network = CommNetwork(**network_kwargs)
+    
+    # >> Network <<
+    print(f"Network (Components: {network.n_components}, Devices: {network.n_devices}, Entrypoints: {network.n_entrypoints})")
     
     # >> Store Metadata <<
     if args.param_name.strip() != "":
@@ -379,7 +392,7 @@ if __name__ == "__main__":
         print(f"Total Number of Tasks: {N_ATTACKS*N_ENTRYPOINTS*N_PARAMS}")
         start_time = time.time()
         # Scheduler will Queue tasks for Ray ActorsR
-        scheduler = MonteScheduler(workers, kwargs["param_values"], N_ENTRYPOINTS, N_ATTACKS, 
+        scheduler = MonteScheduler(workers, kwargs["param_values"], network.n_components, N_ATTACKS, 
                                    random_entry=args.random_entry, random_param=args.random_param,
                                    task_limit=1000)
         scheduler.schedule()

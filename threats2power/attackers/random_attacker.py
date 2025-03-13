@@ -89,11 +89,14 @@ class RandomAttacker(Attacker):
         time_available -= time_spent
         if is_successful:
             nodes_available.update(current_node.get_neighbours())
-            nodes_available.difference_update(set([current_node]))
             nodes_compromised.add(current_node)
             if self.auto_compromise_children:
                 nodes_compromised = self.compromise_children(current_node, nodes_compromised=nodes_compromised)
-        if not self.repeated_attacks:
+            if self.repeated_attacks:
+                nodes_available.difference_update(nodes_compromised)
+            else:
+                nodes_available.difference_update(nodes_visited)
+        elif not self.repeated_attacks:
             nodes_available.difference_update(set([current_node]))
         # Still have time available, and haven't compromised entire network yet
         if time_available > 0 and len(nodes_compromised) < max_can_compromise:
@@ -102,10 +105,10 @@ class RandomAttacker(Attacker):
                 next_node = np.random.choice(next_nodes)
                 (additional_nodes_compromised,
                  time_available) = self.random_walk_with_budget(next_node, time_available,
-                                                   nodes_available=nodes_available,
-                                                   nodes_visited=nodes_visited,
-                                                   nodes_compromised=nodes_compromised,
-                                                   max_can_compromise=max_can_compromise)
+                                                                nodes_available=nodes_available,
+                                                                nodes_visited=nodes_visited,
+                                                                nodes_compromised=nodes_compromised,
+                                                                max_can_compromise=max_can_compromise)
                 nodes_compromised.update(additional_nodes_compromised)
             elif self.verbose:
                 print("--> " + ("Dead End" if current_node.is_compromised else "Failed Attack") + 

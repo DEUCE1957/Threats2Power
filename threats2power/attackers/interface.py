@@ -3,6 +3,8 @@ from ..communication.network import CommNetwork
 
 class Attacker():
     
+    __name__ = "Attacker"
+    
     def __init__(self, budget:float, verbose:bool=False, auto_compromise_children:bool=False, repeated_attacks:bool=False):
         """
         Args:

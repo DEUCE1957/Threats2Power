@@ -120,7 +120,7 @@ class Defence():
         # Spent the exact amount of effort required to try and break the defence
         self.effort_spent = self.effort_to_compromise
         # If 'can_be_successful' is False then no amount of effort can break this defence
-        can_be_successful = self.success_distr.rvs()
+        can_be_successful = bool(self.success_distr.rvs())
         if can_be_successful:
             self.is_compromised = True
         return can_be_successful, budget_used

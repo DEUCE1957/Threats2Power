@@ -6,6 +6,7 @@ import networkx as nx
 from pathlib import Path
 from matplotlib.patches import Patch
 from matplotlib import colors as mc
+from matplotlib.axis import Axis
 from ..communication.graph import CommNode
 from ..communication.network import CommNetwork
 from ..attackers.interface import Attacker
@@ -84,10 +85,18 @@ def hierarchy_layout(G:nx.DiGraph, root:CommNode, size:float=1., gap:float=0.2, 
             
     return _hierarchy_pos(G, root, size, gap, loc, center, invert=invert)
 
+def export_legend(legend, filename="legend.pdf"):
+    fig  = legend.figure
+    fig.canvas.draw()
+    bbox = legend.get_window_extent().transformed(fig.dpi_scale_trans.inverted())
+    fig.savefig(Path.cwd() / "media" / filename, bbox_inches=bbox)
+
 def plot_communication_network(network:CommNetwork, attacker:Attacker=None, palette:str="tab10", layout=hierarchy_layout,
-                               ax=None, save_name:str=None, invert:bool=False,
-                               show_legend:bool=True, legend_loc="lower center", legend_offset:float=-0.1,
-                               show:bool=True, node_size:int=400, **kwargs):
+                               ax:Axis|None=None, save_name:str=None, invert:bool=False,
+                               show_legend:bool=True, legend_loc="lower center", legend_offset:float=-0.1, save_legend:bool=False,
+                               show:bool=True, show_labels:bool=True, node_size:int=400, 
+                               legend_size:int=8, label_size:int=10, title_size:int=12,
+                               **kwargs):
     """
     Plots a tree-like and spring layout of the given communication network.
     The visualization shows:
@@ -115,7 +124,6 @@ def plot_communication_network(network:CommNetwork, attacker:Attacker=None, pale
     palette = sns.color_palette(palette, n_colors=len(node_types))
     color_lookup = {k:v for k,v in zip(node_types, palette)}
     
-
     # Custom Legend
     node_to_pos = {}
     legend_map = {}
@@ -137,7 +145,6 @@ def plot_communication_network(network:CommNetwork, attacker:Attacker=None, pale
             name += " (compromised)"
         legend_map[name] = Patch(facecolor=node_color_mask[i],
                                  edgecolor=node_edge_color_mask[i])
-            
 
     for j, (start_node, end_node) in enumerate(network.graph.edges()):
         # Edges / Communication Channels between 2 compromised nodes are compromised
@@ -162,16 +169,20 @@ def plot_communication_network(network:CommNetwork, attacker:Attacker=None, pale
     nx.draw_networkx_nodes(network.graph, pos=pos, ax=ax,
                            node_size=node_size, node_shape="s", node_color=node_color_mask,
                            linewidths=1.0, edgecolors=node_edge_color_mask)
-    nx.draw_networkx_labels(network.graph, pos=pos, labels=label_map, ax=ax, font_size=10)
+    nx.draw_networkx_labels(network.graph, pos=pos, labels=label_map, ax=ax,
+                            font_size=label_size if show_labels else 0)
     nx.draw_networkx_edges(network.graph, pos=pos, ax=ax, edge_color=edge_color_mask)
     
     if show_legend:
-        ax.legend(labels=labels, handles=handles, ncol=1, loc=legend_loc, bbox_to_anchor=(0.0, legend_offset), # ncol=len(labels),
-                   title="Legend", fancybox=True, fontsize='large', title_fontsize='larger')
+        legend = ax.legend(labels=labels, handles=handles, ncol=1, loc=legend_loc, bbox_to_anchor=(0.0, legend_offset), # ncol=len(labels),
+                   title="Legend", fancybox=True, fontsize=legend_size, title_fontsize=title_size)
+        if save_legend and save_name is not None:
+            export_legend(legend, filename=f"{save_name}_legend.pdf")
     plt.tight_layout()
+    
     if save_name is not None:
-        plt.gcf().savefig(Path(__file__).parent.parent / "media" / f"{save_name}.pdf", bbox_inches='tight')
-        plt.gcf().savefig(Path(__file__).parent.parent / "media" / f"{save_name}.png", bbox_inches='tight')
+        plt.gcf().savefig(Path.cwd() / "media" / f"{save_name}.pdf", bbox_inches='tight')
+        plt.gcf().savefig(Path.cwd() / "media" / f"{save_name}.png", bbox_inches='tight')
     if show:
         plt.show()
     return handles, labels, pos
