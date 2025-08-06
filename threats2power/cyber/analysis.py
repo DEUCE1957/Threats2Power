@@ -243,7 +243,8 @@ class Analyzer():
     def plot_monte(self, info:bool=False, palette:str="Dark2", save_name="Monte",
                    save_dir:Path=Path(__file__).parent.parent / "media",
                    figsize=(14,12), bin_widths:list[float]=[1.0, 5.0], flatten:bool=False,
-                   random_param:bool=False, max_criticality:float=None,
+                   random_param:bool=False, 
+                   as_percentage:bool=False, max_criticality:float=None,
                    show:bool=True, save:bool=True, show_legend:bool=True, 
                    show_compromise:bool=True, show_effort:bool=True,
                    xlim:Tuple[float, float]|None=None, **kwargs) -> Tuple[Figure, Axis]:
@@ -318,13 +319,20 @@ class Analyzer():
                     if has_criticality:
                         print(f"Susceptibility Index: {np.mean(criticality)} (Max: {self.network.maximum_criticality})")
                         ax = fig.add_subplot(gs[row_no, 0] if has_varied_entrypoints else gs[row_no, :])
+                        
                         max_criticality = self.network.maximum_criticality if max_criticality is None else max_criticality
+                        if as_percentage:
+                            criticality = 100.0*(criticality / max_criticality)
+                            max = 10.0
+                        else:
+                            max = max_criticality
+                        
                         for i, binwidth in enumerate(bin_widths):
-                            sns.histplot(criticality, binwidth=binwidth, binrange=(0, max_criticality), stat="probability",
-                                        label=f"Bin Width: {binwidth:.1f}", zorder=-i, ax=ax, **hue_settings)
+                            sns.histplot(criticality, binwidth=binwidth, binrange=(0, max), stat="probability",
+                                         label=f"Bin Width: {binwidth:.1f}", zorder=-i, ax=ax, **hue_settings)
                         mean, low, high = mean_confidence_interval(criticality, confidence=0.95)
                         ax.vlines(x=[mean], ymin=0, ymax=ax.get_ylim()[1], label="Mean", zorder=1,
-                                color="red", linestyles="--", linewidth=3)
+                                  color="red", linestyles="--", linewidth=3)
                         
                         print("Data Range, ", np.min(criticality), np.median(criticality), np.max(criticality))
                         print("Mean Confidence Interval: ", low, mean, high)
@@ -333,7 +341,9 @@ class Analyzer():
                         ax.axvspan(*az.hdi(criticality), alpha=0.5, color='red', zorder=-10)
                         if show_legend:
                             ax.legend()
-                        ax.set(xlabel="Criticality", yscale="log", xlim=(0, max_criticality))
+                        ax.set(xlabel="Criticality (%)" if as_percentage else "Criticality", xlim=(0, max), 
+                               yscale="log", ylim=(math.pow(10, -5),math.pow(10, 0)))
+                        ax.set_yticks([math.pow(10, -5), math.pow(10, -3), math.pow(10, 0)])
                     
                     if has_varied_entrypoints:
                         norm = mpl.colors.BoundaryNorm(np.linspace(0, N, N+1), cmap.N)
