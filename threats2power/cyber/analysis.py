@@ -1,4 +1,4 @@
-import copy
+import copy, os
 import math
 import numpy as np
 import pandas as pd
@@ -8,6 +8,7 @@ import multiprocess as mp
 import matplotlib as mpl
 import matplotlib.pyplot as plt
 import seaborn as sns
+from contextlib import nullcontext
 from matplotlib.figure import Figure
 from matplotlib.axis import Axis
 from pathlib import Path
@@ -133,6 +134,7 @@ class Analyzer():
     def monte_carlo_analysis(self, n_attacks:int, budget:float, attacker_variant:Attacker=RandomAttacker,
                              device_only:bool=True, vary_entrypoints:bool=False,
                              auto_compromise_children:bool=False, repeated_attacks:bool=False,
+                             process_id:int=0,
                              **kwargs):
         """
         Approximate the true probability of compromising N devices by running many randomly
@@ -147,6 +149,13 @@ class Analyzer():
                 Defaults to RandomAttacker.
             device_only (bool): Whether to only count compromised devices (leaf nodes) in the total tally.
                 Defaults to True.
+            vary_entrypoints (bool): Whether to vary where the entrypoint is
+                Defaults to False.
+            auto_compromise_children (bool): Whether to automatically compromise child-nodes if the parent has been
+                compromised.
+                Defaults to False.
+            repeated_attacks (bool): Whether to allow multiple attacks on the same node, if budget remains.
+                Defaults to False.
         """
         # Set Entrypoints
         original_entrypoints = [n.id for n in self.network.entrypoints]
@@ -164,13 +173,12 @@ class Analyzer():
         self.res_monte.update(dict(attacker_variant=attacker_variant, budget=budget, n_attacks=n_attacks,
                                    n_entrypoints=n_entrypoints, auto_compromise_children=auto_compromise_children,
                                    repeated_attacks=repeated_attacks))
-
         for i, entrypoint_id in tqdm(enumerate(entrypoints), desc="Entrypoint ", total=len(entrypoints)): 
             # Consider attacks eminating from specific entrypoint
             self.network.set_entrypoints(entrypoint_id)
             for attack_no in tqdm(range(n_attacks), desc="Attack ", total=n_attacks):
                 attacker:Attacker = attacker_variant(budget=budget, auto_compromise_children=auto_compromise_children, 
-                                                     repeated_attacks=repeated_attacks, verbose=True)
+                                                        repeated_attacks=repeated_attacks, verbose=False)
                 nodes_compromised, total_effort_spent = attacker.attack_network(self.network)
                 # Count how many nodes were compromised (and add up their criticality)
                 critical_sum, device_count = 0, 0

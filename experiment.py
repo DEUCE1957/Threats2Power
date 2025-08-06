@@ -7,6 +7,7 @@ from pathlib import Path
 
 from threats2power.communication.network import CommNetwork
 from threats2power.cyber.analysis import Analyzer
+from threats2power.cyber.criticality import criticality_by_degree, criticality_by_power_flow, criticality_by_capacity
 from threats2power.attackers.random_attacker import RandomAttacker
 
 def is_interactive():
@@ -137,7 +138,6 @@ def run_experiment(seed:int=0, spec:str="Default", grid:str|Path="create_cigre_n
         run_monte(None)
 
 if __name__ == "__main__":
-    from cyber.criticality import criticality_by_degree, criticality_by_power_flow, criticality_by_capacity
     parser = argparse.ArgumentParser()
     parser.add_argument("--seed", default=0, nargs="?", type=int,
                         help="Seed for Monte Carlo simulation")
