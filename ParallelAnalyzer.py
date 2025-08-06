@@ -1,4 +1,4 @@
-import time, copy
+import time, copy, os, psutil
 import inspect, warnings, random
 import logging
 import csv, json, yaml
@@ -280,6 +280,8 @@ if __name__ == "__main__":
     parser.add_argument('-i', "--interactive", dest="interactive", type=lambda x:bool(strtobool(x)),
                         nargs='?', default=True, help='Whether to prompt user for choices')
     args = parser.parse_args()
+    
+    print(f"Number of CPUs available {os.cpu_count()} :: Available Memory {psutil.virtual_memory().total >> 30} GB")
     
     np.random.seed(args.global_seed)
     
