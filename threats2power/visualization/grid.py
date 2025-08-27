@@ -255,7 +255,7 @@ def plot_physical_grid(network:CommNetwork,
         norm = LogNorm(vmin=lowest, vmax=highest)
         plt.gcf().colorbar(ScalarMappable(norm=norm, cmap=mpl.colormaps[palette]), ax=ax, label="Criticality")
     if save_name is not None:
-        plt.gcf().savefig(Path(__file__).parent.parent / "media" / f"{save_name}.pdf", bbox_inches='tight')
+        plt.gcf().savefig(Path(__file__).parent.parent.parent / "media" / f"{save_name}.pdf", bbox_inches='tight')
     if show:
         plt.show()
     return handles, labels, coords

@@ -96,6 +96,7 @@ def plot_communication_network(network:CommNetwork, attacker:Attacker=None, pale
                                show_legend:bool=True, legend_loc="lower center", legend_offset:float=-0.1, save_legend:bool=False,
                                show:bool=True, show_labels:bool=True, node_size:int=400, 
                                legend_size:int=8, label_size:int=10, title_size:int=12,
+                               node_types:list|None = None,
                                **kwargs):
     """
     Plots a tree-like and spring layout of the given communication network.
@@ -119,8 +120,8 @@ def plot_communication_network(network:CommNetwork, attacker:Attacker=None, pale
     node_edge_color_mask = np.full(network.graph.number_of_nodes(), fill_value="#000000", dtype=object)
     edge_color_mask = np.full(network.graph.number_of_edges(), fill_value="#000000", dtype=object)
 
-    # node_types = set(node.name for node in network.graph.nodes())
-    node_types = ["Sensor Device", "Aggregator", "Controller Device", "Control Center"]
+    node_types = set(node.name for node in network.graph.nodes()) if node_types is None else node_types
+    # node_types = ["Sensor Device", "Aggregator", "Controller Device", "Control Center"]
     palette = sns.color_palette(palette, n_colors=len(node_types))
     color_lookup = {k:v for k,v in zip(node_types, palette)}
     
