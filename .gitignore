@@ -9,3 +9,5 @@ grids/*
 media/
 media/*
 *.egg-info
+build/
+build/*

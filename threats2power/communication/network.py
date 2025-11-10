@@ -537,3 +537,24 @@ class CommNetwork(object):
         for child in root.children:
             s = CommNetwork.show_tree(child, s=s, depth=depth+1)
         return s
+    
+    def get_compromised_devices(self, root:Aggregator, compromised:set=set()):
+        """
+        Walk the tree, fetching all compromised assets.
+
+        Args:
+            root (Aggregator): _description_
+            attr_name (str): Name of attribute to modify
+            set_value (object): Value to set the attribute to set
+            idcs_to_match (np.ndarray): Idcs (in walking order) to modify
+            idx (int, optional): Current index in walk. Defaults to 0.
+
+        Returns:
+            int: Last visited index
+        """
+        if root.is_compromised and isinstance(root, Device):
+            compromised.add(root)
+        for child in root.children:
+            new_compromised = self.get_compromised_devices(child, compromised)
+            compromised = new_compromised.union(compromised)
+        return compromised
