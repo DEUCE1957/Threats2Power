@@ -9,7 +9,6 @@ from matplotlib.colors import Normalize, LogNorm
 from .patches import ElectricalPatchMaker, ElectricalPatchHandler
 from ..communication.network import CommNetwork
 
-
 def update_connected_equipment(network:CommNetwork, kind:str="bus"):
     """
     Given a communication network, finds which physical equipment communication
@@ -194,7 +193,9 @@ def color_by_criticality(network, kind, cmap="plasma"):
 def plot_physical_grid(network:CommNetwork,
                        ax=None, show:bool=True, show_legend:bool=True, show_colorbar:bool=False,
                        color_by="color_by_comm", palette="plasma",
-                       size=0.2, distance=0.5, displace=True, save_name:str=None,
+                       bus_size:float=0.2, trafo_size:float=0.16, switch_size:float=0.2, sgen_size:float=0.2, 
+                       load_size:float=0.2, ext_grid_size:float=0.4, 
+                       distance=0.5, displace=True, save_name:str=None,
                        ext_grid_rotation=np.pi/2, gen_rotation=np.pi/2, load_rotation=-np.pi/2, figsize=None):
     grid = network.grid
     color_by = {"color_by_comm":color_by_comm, "color_by_criticality":color_by_criticality}.get(color_by, "color_by_comm")
@@ -206,7 +207,7 @@ def plot_physical_grid(network:CommNetwork,
 
     # Buses
     ax, bus, coords["bus"] = add_buses(ax, grid, c=color_by(network, "bus", cmap=palette),
-                        ec=color_by(network, "bus", cmap=palette), s=size*1000, zorder=11)
+                        ec=color_by(network, "bus", cmap=palette), s=bus_size*1000, zorder=11)
     # Lines
     startx, starty = grid.bus_geodata.loc[grid.line.from_bus].x, grid.bus_geodata.loc[grid.line.from_bus].y
     endx, endy = grid.bus_geodata.loc[grid.line.to_bus].x, grid.bus_geodata.loc[grid.line.to_bus].y
@@ -216,26 +217,26 @@ def plot_physical_grid(network:CommNetwork,
         coords["line"] = coords["line"] + [((x0+x1)/2, (y0+y1)/2)] if "line" in coords else [((x0+x1)/2, (y0+y1)/2)]
 
     # Transformers (placed on line)
-    ax, trafo, coords["trafo"] = add_transformers(ax, grid, size=size*0.8,
+    ax, trafo, coords["trafo"] = add_transformers(ax, grid, size=trafo_size,
                                  ec=color_by(network, "trafo", cmap=palette), fc="white", zorder=10)
 
     # Line Switches (placed on line)
-    ax, switch, coords["switch"] = add_switches(ax, grid, size=size, ec="black", zorder=10)
+    ax, switch, coords["switch"] = add_switches(ax, grid, size=switch_size, ec="black", zorder=10)
     
     # Static Generators
     ax, sgen, coords["sgen"] = add_symbol(ax, grid, symbol="sgen", distance=distance,
                           rotation=gen_rotation, displace=displace,
-                          size=size, fc="white", ec=color_by(network, "sgen", cmap=palette), zorder=10)
+                          size=sgen_size, fc="white", ec=color_by(network, "sgen", cmap=palette), zorder=10)
 
     # Loads
     ax, load, coords["load"] = add_symbol(ax, grid, symbol="load", distance=distance, 
                           rotation=load_rotation, displace=displace,
-                          size=size, fc="white", ec=color_by(network, "load", cmap=palette), zorder=10)
+                          size=load_size, fc="white", ec=color_by(network, "load", cmap=palette), zorder=10)
     
     # External Grid
     ax, ext_grid, coords[ext_grid] = add_symbol(ax, grid, symbol="ext_grid", distance=distance,
                               rotation=ext_grid_rotation, displace=displace, lw=1,
-                              size=size*2, ec=color_by(network, "ext_grid", cmap=palette), fc="white", zorder=10)
+                              size=ext_grid_size, ec=color_by(network, "ext_grid", cmap=palette), fc="white", zorder=10)
     ax.set(aspect="equal", xticks=[], yticks=[])
     
     # Legend (with custom symbols)
@@ -254,7 +255,7 @@ def plot_physical_grid(network:CommNetwork,
         norm = LogNorm(vmin=lowest, vmax=highest)
         plt.gcf().colorbar(ScalarMappable(norm=norm, cmap=mpl.colormaps[palette]), ax=ax, label="Criticality")
     if save_name is not None:
-        plt.gcf().savefig(Path(__file__).parent.parent / "media" / f"{save_name}.pdf", bbox_inches='tight')
+        plt.gcf().savefig(Path(__file__).parent.parent.parent / "media" / f"{save_name}.pdf", bbox_inches='tight')
     if show:
         plt.show()
     return handles, labels, coords

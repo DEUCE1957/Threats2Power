@@ -1,8 +1,7 @@
-import itertools
 from math import isclose
+from typing import Tuple
 from collections import OrderedDict
 from scipy.stats import distributions as distr
-
 
 class Vulnerability():
 
@@ -16,7 +15,7 @@ class Vulnerability():
         self.name = name
         self.exploited = False
 
-    def exploit(self) -> (float, float):
+    def exploit(self) -> Tuple[float, float]:
         """
         Exploit vulnerability to reduce difficulty of breaking associated defence.
         Can only be done once.
@@ -121,7 +120,7 @@ class Defence():
         # Spent the exact amount of effort required to try and break the defence
         self.effort_spent = self.effort_to_compromise
         # If 'can_be_successful' is False then no amount of effort can break this defence
-        can_be_successful = self.success_distr.rvs()
+        can_be_successful = bool(self.success_distr.rvs())
         if can_be_successful:
             self.is_compromised = True
         return can_be_successful, budget_used
@@ -286,7 +285,7 @@ class CyberDevice():
             raise KeyError(f"Defence mechanism of type '{defence.name}' already" +
                            "present in the set of Defences")
 
-    def remove_defence(self, defence:Defence|str) -> bool:
+    def remove_defence(self, defence:Defence) -> bool:
         """
         Remove a defence (by name or reference) from the set of defences.
 
@@ -302,7 +301,7 @@ class CyberDevice():
             return True
         return False
 
-    def attach_vulnerability(self, defence:Defence|str, vulnerability:Vulnerability) -> bool:
+    def attach_vulnerability(self, defence:Defence, vulnerability:Vulnerability) -> bool:
         """
         Attach a vulnerability to a specific defence. 
 
@@ -319,7 +318,7 @@ class CyberDevice():
             return True
         return False
 
-    def remove_vulnerability(self, defence:Defence|str) -> bool:
+    def remove_vulnerability(self, defence:Defence) -> bool:
         """
         Remove a vulnerability from a specific defence. 
 

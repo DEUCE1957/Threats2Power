@@ -1,18 +1,31 @@
-import copy
+import copy, os
 import math
 import numpy as np
 import pandas as pd
+import arviz as az
 from fractions import Fraction
 import multiprocess as mp
 import matplotlib as mpl
 import matplotlib.pyplot as plt
 import seaborn as sns
+from contextlib import nullcontext
+from matplotlib.figure import Figure
+from matplotlib.axis import Axis
 from pathlib import Path
 from tqdm import tqdm
+from typing import Tuple
+from scipy import stats
 from ..communication.components import Device
 from ..communication.network import CommNetwork
 from ..attackers.interface import Attacker
 from ..attackers.random_attacker import RandomAttacker
+
+def mean_confidence_interval(data, confidence=0.95):
+    a = 1.0 * np.array(data)
+    n = len(a)
+    m, se = np.mean(a), stats.sem(a)
+    h = se * stats.t.ppf((1 + confidence) / 2., n-1)
+    return m, m-h, m+h
 
 
 def iterate_over_paths(path, prob, success_count, reachable_nodes={}, visited_nodes={}, id_to_node={}):
@@ -61,10 +74,11 @@ def get_all_paths(graph):
                                     id_to_node=id_to_node)
 
 def monte_process(process_idx, seed, n_attacks=1000, budget=52,
-                  vary_entrypoints=False, device_entry_only=False, auto_compromise_children:bool=False, **network_kwargs):
+                  vary_entrypoints=False, device_entry_only=False, auto_compromise_children:bool=False, 
+                  repeated_attacks:bool=False, **network_kwargs):
     import numpy as np
-    from ..communication.network import CommNetwork
-    from ..attackers.random_attacker import RandomAttacker
+    from communication.network import CommNetwork
+    from attackers.random_attacker import RandomAttacker
     
     # Procedurally generate a communication network with specific redundancy
     np.random.seed(seed)
@@ -75,6 +89,7 @@ def monte_process(process_idx, seed, n_attacks=1000, budget=52,
     compromised_array, effort_array, critical_array = analyzer.monte_carlo_analysis(n_attacks, budget, 
                                                                                     vary_entrypoints=vary_entrypoints,
                                                                                     auto_compromise_children=auto_compromise_children,
+                                                                                    repeated_attacks=repeated_attacks,
                                                                                     **network_kwargs)
     return process_idx, compromised_array, effort_array, critical_array
 
@@ -117,7 +132,9 @@ class Analyzer():
         return res_static
     
     def monte_carlo_analysis(self, n_attacks:int, budget:float, attacker_variant:Attacker=RandomAttacker,
-                             device_only:bool=True, vary_entrypoints:bool=False, auto_compromise_children:bool=False, 
+                             device_only:bool=True, vary_entrypoints:bool=False,
+                             auto_compromise_children:bool=False, repeated_attacks:bool=False,
+                             process_id:int=0,
                              **kwargs):
         """
         Approximate the true probability of compromising N devices by running many randomly
@@ -132,6 +149,13 @@ class Analyzer():
                 Defaults to RandomAttacker.
             device_only (bool): Whether to only count compromised devices (leaf nodes) in the total tally.
                 Defaults to True.
+            vary_entrypoints (bool): Whether to vary where the entrypoint is
+                Defaults to False.
+            auto_compromise_children (bool): Whether to automatically compromise child-nodes if the parent has been
+                compromised.
+                Defaults to False.
+            repeated_attacks (bool): Whether to allow multiple attacks on the same node, if budget remains.
+                Defaults to False.
         """
         # Set Entrypoints
         original_entrypoints = [n.id for n in self.network.entrypoints]
@@ -147,13 +171,14 @@ class Analyzer():
         self.res_monte["criticality"] = np.zeros(shape=(n_attacks, n_entrypoints), dtype=np.float32)
 
         self.res_monte.update(dict(attacker_variant=attacker_variant, budget=budget, n_attacks=n_attacks,
-                                   n_entrypoints=n_entrypoints, auto_compromise_children=auto_compromise_children))
-
-        for i, entrypoint_id in tqdm(enumerate(entrypoints), desc="Entrypoint "): 
+                                   n_entrypoints=n_entrypoints, auto_compromise_children=auto_compromise_children,
+                                   repeated_attacks=repeated_attacks))
+        for i, entrypoint_id in tqdm(enumerate(entrypoints), desc="Entrypoint ", total=len(entrypoints)): 
             # Consider attacks eminating from specific entrypoint
             self.network.set_entrypoints(entrypoint_id)
-            for attack_no in tqdm(range(n_attacks), desc="Attack "):
-                attacker = attacker_variant(budget=budget, auto_compromise_children=auto_compromise_children, verbose=False)
+            for attack_no in tqdm(range(n_attacks), desc="Attack ", total=n_attacks):
+                attacker:Attacker = attacker_variant(budget=budget, auto_compromise_children=auto_compromise_children, 
+                                                        repeated_attacks=repeated_attacks, verbose=False)
                 nodes_compromised, total_effort_spent = attacker.attack_network(self.network)
                 # Count how many nodes were compromised (and add up their criticality)
                 critical_sum, device_count = 0, 0
@@ -210,92 +235,138 @@ class Analyzer():
                 self.res_monte["effort"][:, :, job_idx] = efforts
                 self.res_monte["criticality"][:, :, job_idx] = criticality
         return self.res_monte["compromised"], self.res_monte["effort"], self.res_monte["criticality"]
+    
+    @staticmethod
+    def set_font_size(small_size:int=8, medium_size:int=10, large_size:int=12,
+                      legend_size:int=8, **kwargs):
+        plt.rc('font', size=small_size)              # controls default text sizes
+        plt.rc('axes', titlesize=small_size)         # fontsize of the axes title
+        plt.rc('axes', labelsize=medium_size)        # fontsize of the x and y labels
+        plt.rc('xtick', labelsize=small_size)        # fontsize of the tick labels
+        plt.rc('ytick', labelsize=small_size)        # fontsize of the tick labels
+        plt.rc('legend', fontsize=legend_size)        # legend fontsize
+        plt.rc('legend', title_fontsize=medium_size) # legend title fontsize
+        plt.rc('figure', titlesize=large_size)       # fontsize of the figure title
 
-    def plot_monte(self, info:bool=False, palette:str="Dark2", save_name="Monte", figsize=(14,12), 
-                   bin_widths:list[float]=[1.0, 5.0], flatten:bool=False, max_criticality:float=None):
-        sns.set_context('paper', font_scale=2.0)
-        if self.res_monte != {}:
-            # Multiple Monte Carlo Processes
-            if "param_values" in self.res_monte:
-                # Reshape to collapse all entrypoint variations into the first dimension
-                n_attacks, n_entrypoints, n_params = self.res_monte["compromised"].shape
-                self.res_monte["compromised"] = np.reshape(self.res_monte["compromised"], (n_attacks*n_entrypoints, n_params))
-                # Create Pandas Dataframe (to name attributes)
-                df = pd.DataFrame(self.res_monte["compromised"], columns=self.res_monte["param_values"])
-                df = df.melt(var_name=self.res_monte["param_name"])
+    def plot_monte(self, info:bool=False, palette:str="Dark2", save_name="Monte",
+                   save_dir:Path=Path(__file__).parent.parent / "media",
+                   figsize=(14,12), bin_widths:list[float]=[1.0, 5.0], flatten:bool=False,
+                   random_param:bool=False, 
+                   as_percentage:bool=False, max_criticality:float=None,
+                   show:bool=True, save:bool=True, show_legend:bool=True, 
+                   show_compromise:bool=True, show_effort:bool=True,
+                   xlim:Tuple[float, float]|None=None, **kwargs) -> Tuple[Figure, Axis]:
+        sns.set_context('paper')
+        with plt.rc_context():
+            Analyzer.set_font_size(**kwargs)
+            if self.res_monte != {}:
+                # Multiple Monte Carlo Processes
+                if len(self.res_monte.get("param_values", [])) > 1 and not random_param:
+                    # Reshape to collapse all entrypoint variations into the first dimension
+                    n_attacks, n_entrypoints, n_params = self.res_monte["compromised"].shape
+                    self.res_monte["compromised"] = np.reshape(self.res_monte["compromised"], (n_attacks*n_entrypoints, n_params))
+                    # Create Pandas Dataframe (to name attributes)
+                    df = pd.DataFrame(self.res_monte["compromised"], columns=self.res_monte["param_values"])
+                    df = df.melt(var_name=self.res_monte["param_name"])
 
-                fig, ax = plt.subplots(nrows=1, ncols=1, figsize=figsize)
-                sns.set_context(font_scale=2.0)
-                sns.histplot(df, x="value", hue=self.res_monte["param_name"], discrete=True, stat="probability", common_norm=False, ax=ax)
-                sns.move_legend(ax, "upper right", ncols=4, title=" ".join([word.capitalize() for word in self.res_monte["param_name"].split("_")]))
-                ax.set(xlabel="No. of Devices Compromised", yscale="log")
-                fig.savefig(Path(__file__).parent.parent / "media" / f"{save_name}.pdf")
-                plt.show()
-            # Single Monte Carlo Process
-            else:
-                if info:
-                    print(f"Attacker: {self.res_monte['attacker_variant'].__name__}, Budget: {self.res_monte['budget']}\n" + 
-                          f"Network Size: {self.network.n_components}, No. of Devices: {self.network.n_devices}, " + 
-                          f"No. of Entrypoints: {self.network.n_entrypoints}")
-                                # Combine all entrypoints if Flatten is True
-                compromised = self.res_monte["compromised"].flatten() if flatten else self.res_monte["compromised"]
-                effort = self.res_monte["effort"].flatten() if flatten else self.res_monte["effort"]
-                criticality = self.res_monte["criticality"].flatten() if flatten else self.res_monte["criticality"]
+                    fig, ax = plt.subplots(nrows=1, ncols=1, figsize=figsize)
+                    sns.histplot(df, x="value", hue=self.res_monte["param_name"], discrete=True, stat="probability", common_norm=False, ax=ax)
+                    if show_legend:
+                        sns.move_legend(ax, "upper right", ncols=4, title=" ".join([word.capitalize() for word in self.res_monte["param_name"].split("_")]))
+                    else:
+                        ax.get_legend().set_visible(False) 
+                    ax.set(xlabel="No. of Devices Compromised", yscale="log", xlim=ax.get_xlim() if xlim is None else xlim)
+                # Single Monte Carlo Process
+                else:
+                    if info:
+                        print(f"Attacker: {self.res_monte.get('attacker_variant', Attacker).__name__}, Budget: {self.res_monte.get('budget', 'N.A.')}\n" + 
+                            f"Network Size: {self.network.n_components}, No. of Devices: {self.network.n_devices}, " + 
+                            f"No. of Entrypoints: {self.network.n_entrypoints}")
+                                    # Combine all entrypoints if Flatten is True
+                    compromised = self.res_monte["compromised"].flatten() if flatten else self.res_monte["compromised"]
+                    effort = self.res_monte["effort"].flatten() if flatten else self.res_monte["effort"]
+                    criticality = self.res_monte["criticality"].flatten() if flatten else self.res_monte["criticality"]
 
-                has_varied_entrypoints = False if flatten else (True if compromised.shape[1] > 1 else False)
-                has_criticality = True if not math.isclose(criticality.mean(), 0) else False
+                    has_varied_entrypoints = False if flatten else (True if compromised.shape[1] > 1 else False)
+                    has_criticality = True if not math.isclose(criticality.mean(), 0) else False
+                    has_effort = (True if not math.isclose(effort.mean(), effort.max()) else False) and show_effort
+                    print(f"Has Criticality: {has_criticality}, Has Effort: {has_effort}, Show Compromise: {show_compromise}")
+                    fig = plt.figure(figsize=figsize)
+                    nrows = (1 if has_criticality else 0) + (1 if has_effort else 0) + (1 if show_compromise else 0)
+                    gs = mpl.gridspec.GridSpec(nrows=nrows, ncols=2, figure=fig, width_ratios=(0.95, 0.05))
 
-                fig = plt.figure(figsize=figsize)
-                gs = mpl.gridspec.GridSpec(nrows=3 if has_criticality else 2, ncols=2, figure=fig, width_ratios=(0.95, 0.05))
-
-                N = 1 if flatten else compromised.shape[1]
-                palette = sns.color_palette(palette=palette, n_colors=N, as_cmap=False)
-                hue_settings = dict(palette=palette) if N > 1 else {}
-                cmap = mpl.colors.ListedColormap(palette)
-
-                # Compromise Distribution
-                ax = fig.add_subplot(gs[0, 0] if has_varied_entrypoints else gs[0, :])
-                sns.histplot(compromised, discrete=True, stat="probability", ax=ax, **hue_settings)
-                ax.set(xlabel="No. of Components Compromised", xlim=(-0.5, np.max(compromised)+0.5))
-                
-                legend = ax.get_legend()
-                if legend is not None:
-                    legend.remove()
-
-                # Effort Distribution
-                ax = fig.add_subplot(gs[1, 0] if has_varied_entrypoints else gs[1, :])
-                sns.histplot(effort, binwidth=1, stat="percent", ax=ax, **hue_settings)
-                ax.set(xlabel="Effort Spent", xlim=(0, np.max(effort)))
-                
-                legend = ax.get_legend()
-                if legend is not None:
-                    legend.remove()
-                
-                # Criticality Distribution
-                if has_criticality:
-                    print(f"Susceptibility Index: {np.mean(criticality)} (Max: {self.network.maximum_criticality})")
-                    ax = fig.add_subplot(gs[2, 0] if has_varied_entrypoints else gs[2, :])
-                    max_criticality = self.network.maximum_criticality if max_criticality is None else max_criticality
-                    for i, binwidth in enumerate(bin_widths):
-                        sns.histplot(criticality, binwidth=binwidth, binrange=(0, max_criticality), stat="probability",
-                                     label=f"Bin Width: {binwidth:.1f}", zorder=-i, ax=ax, **hue_settings)
-                    ax.vlines(x=[np.mean(criticality)], ymin=0, ymax=ax.get_ylim()[1], label="Mean", zorder=1,
-                                color="red", linestyles="--", linewidth=3)
-                    ax.legend()
-                    ax.set(xlabel="Criticality", yscale="log")
-                    plt.show()
+                    N = 1 if flatten else compromised.shape[1]
+                    palette = sns.color_palette(palette=palette, n_colors=N, as_cmap=False)
+                    hue_settings = dict(palette=palette) if N > 1 else {}
+                    cmap = mpl.colors.ListedColormap(palette)
                     
-
-
-                if has_varied_entrypoints:
-                    norm = mpl.colors.BoundaryNorm(np.linspace(0, N, N+1), cmap.N)
-                    sm = mpl.cm.ScalarMappable(cmap=cmap, norm=norm)
-                    fig.colorbar(sm, cax=fig.asdd_subplot(gs[:, 1]), label="Entrypoint",
-                                    ticks=np.arange(1, N+1))
+                    # Compromise Distribution
+                    row_no = 0
+                    if show_compromise:
+                        ax = fig.add_subplot(gs[row_no, 0] if has_varied_entrypoints else gs[row_no, :])
+                        sns.histplot(compromised, discrete=True, stat="probability", ax=ax, **hue_settings)
+                        ax.set(xlabel="No. of Components Compromised", xlim=(-0.5, np.max(compromised)+0.5))
+                    
+                        legend = ax.get_legend()
+                        if legend is not None:
+                            legend.remove()
+                        row_no += 1
+                    
+                    # Effort Distribution
+                    if has_effort:
+                        ax = fig.add_subplot(gs[row_no, 0] if has_varied_entrypoints else gs[row_no, :])
+                        sns.histplot(effort, binwidth=1, stat="percent", ax=ax, **hue_settings)
+                        ax.set(xlabel="Effort Spent", xlim=(0, np.max(effort)))
+                        row_no += 1
+                        
+                        legend = ax.get_legend()
+                        if legend is not None:
+                            legend.remove()
+                    
+                    # Criticality Distribution
+                    if has_criticality:
+                        print(f"Susceptibility Index: {np.mean(criticality)} (Max: {self.network.maximum_criticality})")
+                        ax = fig.add_subplot(gs[row_no, 0] if has_varied_entrypoints else gs[row_no, :])
+                        
+                        max_criticality = self.network.maximum_criticality if max_criticality is None else max_criticality
+                        if as_percentage:
+                            criticality = 100.0*(criticality / max_criticality)
+                            max = 10.0
+                        else:
+                            max = max_criticality
+                        
+                        for i, binwidth in enumerate(bin_widths):
+                            sns.histplot(criticality, binwidth=binwidth, binrange=(0, max), stat="probability",
+                                         label=f"Bin Width: {binwidth:.1f}", zorder=-i, ax=ax, **hue_settings)
+                        mean, low, high = mean_confidence_interval(criticality, confidence=0.95)
+                        ax.vlines(x=[mean], ymin=0, ymax=ax.get_ylim()[1], label="Mean", zorder=1,
+                                  color="red", linestyles="--", linewidth=3)
+                        
+                        print("Data Range, ", np.min(criticality), np.median(criticality), np.max(criticality))
+                        print("Mean Confidence Interval: ", low, mean, high)
+                        print("High Credibility Interval: ", az.hdi(criticality))
+                        # ax.axvspan(low, high, alpha=0.5, color='red')
+                        ax.axvspan(*az.hdi(criticality), alpha=0.5, color='red', zorder=-10)
+                        if show_legend:
+                            ax.legend()
+                        ax.set(xlabel="Criticality (%)" if as_percentage else "Criticality", xlim=(0, max), 
+                               yscale="log", ylim=(math.pow(10, -5),math.pow(10, 0)))
+                        ax.set_yticks([math.pow(10, -5), math.pow(10, -3), math.pow(10, 0)])
+                    
+                    if has_varied_entrypoints:
+                        norm = mpl.colors.BoundaryNorm(np.linspace(0, N, N+1), cmap.N)
+                        sm = mpl.cm.ScalarMappable(cmap=cmap, norm=norm)
+                        fig.colorbar(sm, cax=fig.asdd_subplot(gs[:, 1]), label="Entrypoint",
+                                        ticks=np.arange(1, N+1))
                 plt.tight_layout()
-                fig.savefig(Path(__file__).parent.parent / "media" / f"{save_name}.pdf")
-                plt.show()
-
+                if save:
+                    fig.savefig(save_dir / f"{save_name}.pdf")
+                if show:
+                    plt.show()
+                return fig, ax
+        return None, None
+                
+                
     
     def plot_static(self):
         if self.res_static != {}:
@@ -304,5 +375,5 @@ class Analyzer():
             ax.set(ylabel="Probability", xlabel="Components")
 
             fig.suptitle(f"Network Size: {self.network.n_components}, No. of Devices: {self.network.n_devices}, " + 
-                        f"No. of Entrypoints: {self.network.n_entrypoints}", 
+                         f"No. of Entrypoints: {self.network.n_entrypoints}", 
                                         y=-0.01, fontsize="medium", ma="center")

@@ -2,11 +2,10 @@ from pandapower.toolbox import pp_elements
 from .graph import CommNode
 from ..cyber.assets import CyberDevice
 
-
 class Equipment():
     __name__ = "Equipment"
 
-    def __init__(self, name:str, kind:pp_elements(), *args, criticality:float=0, **kwargs) -> None:
+    def __init__(self, name:str, kind:set, *args, criticality:float=0, **kwargs) -> None:
         """
         Representation of specific PandaPower equipment, such as a transformer ('trafo') or
         a generator ('gen').

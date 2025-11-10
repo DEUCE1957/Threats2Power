@@ -1,9 +1,9 @@
 .venv/
 .venv/*
-__pycache__/
-__pycache__/*
 .vscode/
 .vscode/*
+__pycache__/
+__pycache__/*
 grids/
 grids/*
 media/
