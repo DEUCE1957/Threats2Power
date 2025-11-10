@@ -63,8 +63,8 @@ def get_all_paths(graph):
 def monte_process(process_idx, seed, n_attacks=1000, budget=52,
                   vary_entrypoints=False, device_entry_only=False, auto_compromise_children:bool=False, **network_kwargs):
     import numpy as np
-    from communication.network import CommNetwork
-    from attackers.random_attacker import RandomAttacker
+    from ..communication.network import CommNetwork
+    from ..attackers.random_attacker import RandomAttacker
     
     # Procedurally generate a communication network with specific redundancy
     np.random.seed(seed)
