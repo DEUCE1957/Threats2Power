@@ -1,6 +1,6 @@
 from pandapower.toolbox import pp_elements
-from communication.graph import CommNode
-from cyber.assets import CyberDevice
+from .graph import CommNode
+from ..cyber.assets import CyberDevice
 
 
 class Equipment():

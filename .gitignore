@@ -8,3 +8,4 @@ grids/
 grids/*
 media/
 media/*
+*.egg-info

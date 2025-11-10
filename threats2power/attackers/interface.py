@@ -1,5 +1,5 @@
-from communication.network import CommNetwork
 from abc import abstractmethod
+from ..communication.network import CommNetwork
 
 class Attacker():
     

@@ -1,8 +1,8 @@
 import numpy as np
 import pandapower
 from collections import defaultdict
-from communication.graph import CommNode
-from communication.components import Device, Aggregator
+from ..communication.graph import CommNode
+from ..communication.components import Device, Aggregator
 
 def build_leaves(specs, n_devices=10, grid:pandapower.pandapowerNet=None, prop=None):
     """

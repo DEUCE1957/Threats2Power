@@ -8,10 +8,10 @@ from matplotlib.patches import Patch
 from matplotlib import colors as mc
 from collections import defaultdict
 from pandapower.plotting import simple_plot
-from communication.graph import CommNode
-from communication.components import Device, Aggregator
-from communication.network import CommNetwork
-from attackers.interface import Attacker
+from ..communication.graph import CommNode
+from ..communication.components import Device, Aggregator
+from ..communication.network import CommNetwork
+from ..attackers.interface import Attacker
 
 
 def lighten_color(color, amount=0.5):

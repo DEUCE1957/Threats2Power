@@ -8,10 +8,10 @@ import pandapower
 from collections import defaultdict
 from pathlib import Path as p
 from scipy.stats import distributions as distr
-from cyber.assets import CyberDevice, Defence, Vulnerability
-from communication.graph import CommNode, CommEdge
-from communication.components import Equipment, Device, Aggregator
-from procedural.specification import SpecDecoder
+from .graph import CommNode, CommEdge
+from .components import Equipment, Device, Aggregator
+from ..cyber.assets import CyberDevice, Defence, Vulnerability
+from ..procedural.specification import SpecDecoder
 
 
 class CommNetwork(object):

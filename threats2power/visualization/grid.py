@@ -6,8 +6,8 @@ from matplotlib.transforms import Affine2D
 from pathlib import Path
 from matplotlib.cm import ScalarMappable
 from matplotlib.colors import Normalize, LogNorm
-from communication.network import CommNetwork
-from visualization.patches import ElectricalPatchMaker, ElectricalPatchHandler
+from .patches import ElectricalPatchMaker, ElectricalPatchHandler
+from ..communication.network import CommNetwork
 
 
 def update_connected_equipment(network:CommNetwork, kind:str="bus"):

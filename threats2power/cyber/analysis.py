@@ -9,10 +9,10 @@ import matplotlib.pyplot as plt
 import seaborn as sns
 from pathlib import Path
 from tqdm import tqdm
-from communication.components import Device
-from communication.network import CommNetwork
-from attackers.interface import Attacker
-from attackers.random_attacker import RandomAttacker
+from ..communication.components import Device
+from ..communication.network import CommNetwork
+from ..attackers.interface import Attacker
+from ..attackers.random_attacker import RandomAttacker
 
 
 def iterate_over_paths(path, prob, success_count, reachable_nodes={}, visited_nodes={}, id_to_node={}):
