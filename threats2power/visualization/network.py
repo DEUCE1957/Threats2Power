@@ -88,7 +88,7 @@ def hierarchy_layout(G:nx.DiGraph, root:CommNode, size:float=1., gap:float=0.2, 
     return _hierarchy_pos(G, root, size, gap, loc, center, invert=invert)
 
 def plot_communication_network(network:CommNetwork, attacker:Attacker=None, palette:str="tab10", layout=hierarchy_layout,
-                               ax=None, save_name:str=None, show_legend:bool=True, invert:bool=False, show:bool=True, **kwargs):
+                               ax=None, save_name:str|Path=None, show_legend:bool=True, invert:bool=False, show:bool=True, **kwargs):
     """
     Plots a tree-like and spring layout of the given communication network.
     The visualization shows:
@@ -169,8 +169,8 @@ def plot_communication_network(network:CommNetwork, attacker:Attacker=None, pale
                    title="Legend", fancybox=True, fontsize='large', title_fontsize='larger')
     plt.tight_layout()
     if save_name is not None:
-        plt.gcf().savefig(Path(__file__).parent.parent / "media" / f"{save_name}.pdf", bbox_inches='tight')
-        plt.gcf().savefig(Path(__file__).parent.parent / "media" / f"{save_name}.png", bbox_inches='tight')
+        plt.gcf().savefig(Path(__file__).parents[2] / "media" / f"{save_name}.pdf", bbox_inches='tight')
+        plt.gcf().savefig(Path(__file__).parents[2] / "media" / f"{save_name}.png", bbox_inches='tight')
     if show:
         plt.show()
     return handles, labels, pos

@@ -10,12 +10,12 @@ import pandapower
 import tqdm
 import multiprocessing as mp
 from multiprocessing import Process, Queue, current_process, freeze_support
-from communication.network import CommNetwork
-from cyber.analysis import Analyzer
-from attackers.interface import Attacker
-from attackers.random_attacker import RandomAttacker
-from communication.components import Device
-from cyber.criticality import criticality_by_degree, criticality_by_power_flow, criticality_by_capacity
+from threats2power.communication.network import CommNetwork
+from threats2power.cyber.analysis import Analyzer
+from threats2power.attackers.interface import Attacker
+from threats2power.attackers.random_attacker import RandomAttacker
+from threats2power.communication.components import Device
+from threats2power.cyber.criticality import criticality_by_degree, criticality_by_power_flow, criticality_by_capacity
 from pathlib import Path
 # attack_seeds = np.random.randint(low=0, high=2**32-1, size=n_attacks)
 # Each thread grabs work from the queue (seed for network)
