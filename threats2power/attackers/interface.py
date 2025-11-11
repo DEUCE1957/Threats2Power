@@ -1,3 +1,4 @@
+import numpy as np
 from abc import abstractmethod
 from ..communication.network import CommNetwork
 
@@ -5,7 +6,7 @@ class Attacker():
     
     __name__ = "Attacker"
     
-    def __init__(self, budget:float, verbose:bool=False, auto_compromise_children:bool=False, repeated_attacks:bool=False):
+    def __init__(self, budget:float, verbose:bool=False, auto_compromise_children:bool=False, repeated_attacks:bool=False, seed:int|None=None):
         """
         Args:
             budget (float): Time available to compromise nodes, starting at the entry point.
@@ -16,6 +17,7 @@ class Attacker():
         self.verbose = verbose
         self.auto_compromise_children = auto_compromise_children
         self.repeated_attacks = repeated_attacks
+        self.rng = np.random.default_rng(seed)
     
     @abstractmethod
     def attack_network(self, comm_network:CommNetwork) -> None:
