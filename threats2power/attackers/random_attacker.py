@@ -102,7 +102,7 @@ class RandomAttacker(Attacker):
         if time_available > 0 and len(nodes_compromised) < max_can_compromise:
             next_nodes = list(nodes_available)
             if len(nodes_available) > 0:
-                next_node = self.rng.choice(next_nodes)
+                next_node = np.random.choice(next_nodes)
                 (additional_nodes_compromised,
                  time_available) = self.random_walk_with_budget(next_node, time_available,
                                                                 nodes_available=nodes_available,
@@ -138,7 +138,7 @@ class RandomAttacker(Attacker):
             print("Attack Path:\nStart", end=" ")
         (additional_nodes_compromised,
          effort_leftover) = self.random_walk_with_budget(
-                                 current_node=self.rng.choice(comm_network.entrypoints),
+                                 current_node=np.random.choice(comm_network.entrypoints),
                                  time_available=effort_available,
                                  nodes_available=set(comm_network.entrypoints),
                                  nodes_visited=set(),

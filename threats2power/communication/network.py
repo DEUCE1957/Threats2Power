@@ -30,7 +30,8 @@ class CommNetwork(object):
                  crit_norm:bool=False,
                  effort_only:bool=False,
                  sibling_to_sibling_comm:[False, "adjacent", "all"]=False,
-                 n_entrypoints:int=1, **kwargs):
+                 n_entrypoints:int=1,
+                 **kwargs):
         """
         The topology of the communication network is procedurally generated based on the
         parameters set here.
@@ -241,7 +242,7 @@ class CommNetwork(object):
                                 is_controller=device_attrs["is_controller"],
                                 is_sensor=device_attrs["is_sensor"],
                                 is_autonomous=device_attrs["is_autonomous"],
-                                is_accessible=device_attrs["is_accessible"],)
+                                is_accessible=device_attrs["is_accessible"])
                 CommNetwork.attach_cyber_characteristics(device, cat)
                 
                 # Find all devices connected to specific physical equipment (e.g. a generator)
@@ -395,8 +396,8 @@ class CommNetwork(object):
             accessible_ids = possible_entrypoints if isinstance(possible_entrypoints, list) else [possible_entrypoints]
         else: # Select from a list of all assets
             accessible_ids = np.random.choice(self.node_ids,
-                                              min(self.n_components - 1, self.n_entrypoints),
-                                                replace=False)
+                                             min(self.n_components - 1, self.n_entrypoints),
+                                             replace=False)
         for accessible_id in accessible_ids:
             component = self.id_to_node[accessible_id]
             component.is_accessible = True
