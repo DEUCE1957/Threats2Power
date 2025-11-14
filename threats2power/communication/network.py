@@ -383,7 +383,7 @@ class CommNetwork(object):
                 equip.criticality = equip.criticality / self.maximum_criticality
         return self.build_network(components)
     
-    def set_entrypoints(self, possible_entrypoints:int|None=None):
+    def set_entrypoints(self, possible_entrypoints:int|None=None, rng:np.random.Generator|None=None):
         """
         Randomly set entry points at devices or aggregators in the network.
         Excludes control center / root.
@@ -395,9 +395,10 @@ class CommNetwork(object):
         if possible_entrypoints is not None: # Select from a list of specific entrypoints
             accessible_ids = possible_entrypoints if isinstance(possible_entrypoints, list) else [possible_entrypoints]
         else: # Select from a list of all assets
-            accessible_ids = np.random.choice(self.node_ids,
-                                             min(self.n_components - 1, self.n_entrypoints),
-                                             replace=False)
+            choice = np.random.choice if rng is None else rng.choice
+            accessible_ids = choice(self.node_ids,
+                                    min(self.n_components - 1, self.n_entrypoints),
+                                    replace=False)
         for accessible_id in accessible_ids:
             component = self.id_to_node[accessible_id]
             component.is_accessible = True
@@ -441,24 +442,24 @@ class CommNetwork(object):
         for child in root.children:
             self.walk_and_set_entrypoints(child, ids_to_match)
     
-    def reset(self, possible_entrypoints:int|None=None):
+    def reset(self, possible_entrypoints:int|None=None, rng:np.random.Generator|None=None):
         """
         Resets the network, including setting new entrypoint(s)
         """
-        self.set_entrypoints(possible_entrypoints)
-        self.reset_cyber_components(active_node=self.root)
+        self.set_entrypoints(possible_entrypoints, rng=rng)
+        self.reset_cyber_components(active_node=self.root, rng=rng)
         self.graph = self.build_graph(self.root, graph=nx.DiGraph())
 
-    def reset_cyber_components(self, active_node=None):
+    def reset_cyber_components(self, active_node=None, rng:np.random.Generator|None=None):
         """
         Recursively reset the cyber security status of all components in
         the network, starts from the root node.
         """
         if active_node is None:
             active_node = self.root
-        active_node.reset()
+        active_node.reset(rng)
         for child in active_node.children:
-            self.reset_cyber_components(active_node=child)
+            self.reset_cyber_components(active_node=child, rng=rng)
 
     @staticmethod
     def get_binary_attributes(configuration:dict, attributes:list[str], default:bool=False):

@@ -96,7 +96,7 @@ class Defence():
         else:
             return True
     
-    def attack(self, budget:float, exploit_vulnerability:bool=False) -> (bool, float):
+    def attack(self, budget:float, exploit_vulnerability:bool=False, rng:np.random.RandomState|None=None) -> (bool, float):
         """
         Attack this defence with a certain time budget available.
         Note that effort is not an exact measure, though it approximately represents days.
@@ -121,7 +121,7 @@ class Defence():
         # Spent the exact amount of effort required to try and break the defence
         self.effort_spent = self.effort_to_compromise
         # If 'can_be_successful' is False then no amount of effort can break this defence
-        can_be_successful = bool(self.success_distr.rvs())
+        can_be_successful = bool(self.success_distr.rvs(random_state=rng))
         if can_be_successful:
             self.is_compromised = True
         return can_be_successful, budget_used
@@ -133,10 +133,10 @@ class Defence():
         """
         self.is_compromised = True
 
-    def reset(self):
+    def reset(self, rng:np.random.RandomState|None):
         self.is_compromised = False
         self.effort_spent = 0.0
-        self.effort_to_compromise = self.effort_distribution.rvs()
+        self.effort_to_compromise = self.effort_distribution.rvs(random_state=rng)
 
 class CommmonDefences():
     """
@@ -205,7 +205,7 @@ class CyberDevice():
         self.total_effort_spent = 0.0
         self.defences = OrderedDict()
     
-    def attack(self, budget:float) -> (bool, float):
+    def attack(self, budget:float, rng:np.random.Generator|None=None) -> (bool, float):
         """
         Attack this device with a certain time budget available. Note that time is not an exact measure.
         To successfuly compromise the device, all defences must be broken.
@@ -222,7 +222,7 @@ class CyberDevice():
             if defence.is_compromised:
                 is_successful, effort = True, 0
             else:
-                is_successful, effort = defence.attack(budget)
+                is_successful, effort = defence.attack(budget, rng=rng)
             effort_spent += effort
             budget -= effort
             # Could not get past the defence, or ran out of time
@@ -335,8 +335,8 @@ class CyberDevice():
             return True
         return False
 
-    def reset(self):
+    def reset(self, rng:np.random.Generator|None):
         self.is_compromised = False
         self.total_effort_spent = 0.0
         for name in self.defences:
-            self.defences[name].reset()
+            self.defences[name].reset(rng)
